@@ -29,6 +29,16 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
+## Supabase 설정
+
+- **posts 테이블**: `image_url` 컬럼 추가 (text, nullable). 기소 시 첨부 이미지 URL 저장.
+- **comments 테이블**: 익명 댓글(반론)용.  
+  - `id` (uuid, PK, default gen_random_uuid())  
+  - `post_id` (uuid, FK → posts.id)  
+  - `content` (text)  
+  - `created_at` (timestamptz, default now())
+- **Storage**: 버킷 `gaepan-images` 생성 후 Public으로 설정. 업로드 정책에서 anon INSERT 허용.
+
 ## Deploy on Vercel
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.

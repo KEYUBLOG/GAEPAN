@@ -9,6 +9,7 @@ type JudgeRequest = {
   plaintiff: string;
   defendant: string;
   details: string;
+  image_url?: string | null;
 };
 
 type JudgeVerdict = {
@@ -24,6 +25,27 @@ type JudgeVerdict = {
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.trim().length > 0;
+}
+
+/** 금지어·부적절 내용 포함 시 true (판결불가) */
+function isForbiddenOrInappropriate(req: JudgeRequest): boolean {
+  const combined = `${req.title} ${req.plaintiff} ${req.defendant} ${req.details}`.toLowerCase();
+  const normalized = combined.normalize("NFD").replace(/\p{Mn}/gu, "");
+
+  const forbidden = [
+    "시발", "씨발", "ㅅㅂ", "ㅂㅅ", "지랄", "닥쳐", "죽어", "뒤져",
+    "개새", "병신", "한남", "한녀", "혐오", "테러", "폭탄", "살인",
+    "아동", "미성년", "성착취", "스팸", "광고", "홍보", "도배",
+  ];
+
+  for (const word of forbidden) {
+    if (combined.includes(word) || normalized.includes(word)) return true;
+  }
+
+  if (req.details.length < 10) return true;
+  if (req.title.length > 200 || req.details.length > 10000) return true;
+
+  return false;
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -206,6 +228,10 @@ export async function POST(request: Request) {
     const plaintiff = body.plaintiff;
     const defendant = body.defendant;
     const details = body.details;
+    const imageUrl =
+      typeof body.image_url === "string" && body.image_url.trim().length > 0
+        ? body.image_url.trim()
+        : null;
 
     if (
       !isNonEmptyString(title) ||
@@ -225,6 +251,31 @@ export async function POST(request: Request) {
       defendant: defendant.trim(),
       details: details.trim(),
     };
+
+    const supabase = createSupabaseServerClient();
+    const isBlocked = isForbiddenOrInappropriate(req);
+
+    if (isBlocked) {
+      const { error } = await supabase.from("posts").insert({
+        title: req.title,
+        content: req.details,
+        verdict: "판결불가",
+        punchline: "",
+        ratio: 0,
+        plaintiff: req.plaintiff,
+        defendant: req.defendant,
+        status: "판결불가",
+        guilty: 0,
+        not_guilty: 0,
+        image_url: imageUrl,
+      });
+
+      if (error) {
+        console.error("DB_INSERT_ERROR:", error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+      return NextResponse.json({ ok: true, status: "판결불가", verdict: null });
+    }
 
     const hasGemini = !!process.env.GEMINI_API_KEY;
     console.log("[GAEPAN] POST /api/judge — GEMINI_API_KEY loaded?", hasGemini);
@@ -250,8 +301,6 @@ export async function POST(request: Request) {
       ratio: verdict.ratio,
     });
 
-    // Supabase에 판결 저장 (posts 테이블) — SQL 컬럼과 필드명 일치: title, content, verdict, punchline, ratio, plaintiff, defendant
-    const supabase = createSupabaseServerClient();
     const { error } = await supabase.from("posts").insert({
       title: verdict.title,
       content: req.details,
@@ -260,6 +309,10 @@ export async function POST(request: Request) {
       ratio: Number(verdict.ratio.defendant),
       plaintiff: req.plaintiff,
       defendant: req.defendant,
+      status: "판결완료",
+      guilty: 0,
+      not_guilty: 0,
+      image_url: imageUrl,
     });
 
     if (error) {

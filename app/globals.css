@@ -1,22 +1,24 @@
 @import "tailwindcss";
 
+/* 사이트 전체 다크모드 + 법정 느낌 금색 포인트 */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0c0c0e;
+  --foreground: #e4e4e7;
+  --gold: #D4AF37;
+  --gold-light: #e5c65c;
+  --gold-dark: #b8962e;
+  --gold-muted: rgba(212, 175, 55, 0.15);
+  --gold-border: rgba(212, 175, 55, 0.4);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-gold: var(--gold);
+  --color-gold-light: var(--gold-light);
+  --color-gold-dark: var(--gold-dark);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 html {
@@ -28,4 +30,26 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
   overflow-y: auto;
+}
+
+/* 판사봉 내리치기 애니메이션 */
+@keyframes gavel-strike {
+  0% { transform: rotate(-35deg); }
+  18% { transform: rotate(12deg); }
+  22% { transform: rotate(8deg); }
+  100% { transform: rotate(-35deg); }
+}
+
+@keyframes gavel-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-gavel-strike {
+  animation: gavel-strike 0.6s ease-in-out 3;
+  transform-origin: 50% 20%;
+}
+
+.animate-gavel-overlay {
+  animation: gavel-overlay-in 0.2s ease-out;
 }
