@@ -72,7 +72,6 @@ export default function Home() {
   const [commentsError, setCommentsError] = useState<string | null>(null);
   const [commentInput, setCommentInput] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
-  const [showGavel, setShowGavel] = useState(false);
 
   const firstFieldRef = useRef<HTMLInputElement | null>(null);
 
@@ -267,11 +266,9 @@ export default function Home() {
     e.preventDefault();
     if (!canSubmit) return;
 
-    setShowGavel(true);
     setIsReviewing(true);
     setJudgeResult(null);
     setJudgeError(null);
-    setTimeout(() => setShowGavel(false), 2200);
 
     console.log("[GAEPAN] 기소장 접수", {
       사건제목: form.title.trim(),
@@ -391,29 +388,17 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-gold selection:text-black">
-      {/* 판사봉 내리치기 오버레이 */}
-      {showGavel ? (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 animate-gavel-overlay"
-          aria-hidden="true"
-        >
-          <div className="animate-gavel-strike text-[120px] md:text-[160px] drop-shadow-[0_0_30px_rgba(212,175,55,0.8)]" style={{ filter: "drop-shadow(0 0 20px #D4AF37)" }}>
-            🔨
-          </div>
-        </div>
-      ) : null}
-
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-amber-500 selection:text-black">
       {/* GNB (상단바) */}
       <nav className="p-6 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50">
-        <h1 className="text-2xl font-black tracking-tighter text-gold italic">GAEPAN</h1>
+        <h1 className="text-2xl font-black tracking-tighter text-amber-500 italic">GAEPAN</h1>
         <div className="space-x-6 text-sm font-bold text-zinc-400">
-          <button className="hover:text-gold transition">진행중인 재판</button>
-          <button className="hover:text-gold transition">명예의 전당</button>
+          <button className="hover:text-amber-500 transition">진행중인 재판</button>
+          <button className="hover:text-amber-500 transition">명예의 전당</button>
           <button
             type="button"
             onClick={openAccuse}
-            className="bg-gold hover:bg-gold-light text-black px-4 py-2 rounded-full transition"
+            className="bg-amber-600 hover:bg-amber-500 text-black px-4 py-2 rounded-full transition"
           >
             기소하기
           </button>
@@ -422,11 +407,11 @@ export default function Home() {
 
       {/* Hero Section */}
       <main className="max-w-4xl mx-auto pt-24 pb-20 px-6 text-center">
-        <div className="inline-block px-4 py-1.5 mb-6 text-xs font-bold tracking-widest uppercase bg-zinc-900 border border-zinc-800 rounded-full text-gold">
+        <div className="inline-block px-4 py-1.5 mb-6 text-xs font-bold tracking-widest uppercase bg-zinc-900 border border-zinc-800 rounded-full text-amber-500">
           24/7 무자비한 AI 법정
         </div>
         <h2 className="text-6xl md:text-8xl font-black mb-8 tracking-tighter leading-none">
-          누가 <span className="text-gold underline decoration-zinc-800">죄인</span>인가?
+          누가 <span className="text-amber-500 underline decoration-zinc-800">죄인</span>인가?
         </h2>
         <p className="text-zinc-500 text-xl md:text-2xl mb-12 font-medium leading-relaxed">
           당신의 억울한 사연, <br className="hidden md:block" /> 
@@ -437,7 +422,7 @@ export default function Home() {
           <button
             type="button"
             onClick={openAccuse}
-            className="w-full md:w-auto bg-zinc-100 text-black text-xl px-12 py-5 rounded-2xl font-black hover:bg-gold transition-all shadow-[0_0_40px_rgba(212,175,55,0.2)] hover:shadow-[0_0_40px_rgba(212,175,55,0.35)] active:scale-95"
+            className="w-full md:w-auto bg-zinc-100 text-black text-xl px-12 py-5 rounded-2xl font-black hover:bg-amber-500 transition-all shadow-[0_0_40px_rgba(255,255,255,0.1)] hover:shadow-amber-500/20 active:scale-95"
           >
             지금 기소하기 (공짜)
           </button>
@@ -450,11 +435,11 @@ export default function Home() {
       {/* 이달의 대역죄인 — 유죄 표 가장 많은 기소장 */}
       {topGuiltyPost && topGuiltyPost.guilty > 0 ? (
         <section className="max-w-5xl mx-auto px-6 pb-16">
-          <div className="rounded-[2rem] border-2 border-gold/50 bg-gradient-to-b from-gold/10 to-transparent p-8 md:p-10">
-            <div className="text-xs font-black tracking-widest uppercase text-gold mb-2">
+          <div className="rounded-[2rem] border-2 border-amber-500/50 bg-gradient-to-b from-amber-500/10 to-transparent p-8 md:p-10">
+            <div className="text-xs font-black tracking-widest uppercase text-amber-500 mb-2">
               이달의 대역죄인
             </div>
-            <h3 className="text-3xl md:text-4xl font-black mb-4 text-gold/90">
+            <h3 className="text-3xl md:text-4xl font-black mb-4 text-amber-50">
               {topGuiltyPost.title}
             </h3>
             <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-400 mb-4">
@@ -482,10 +467,10 @@ export default function Home() {
             <h3 className="text-3xl font-black mb-2">실시간 재판소</h3>
             <p className="text-zinc-500">지금 이 시각, 가장 뜨거운 갈등들</p>
           </div>
-          <div className="flex items-center gap-2 text-gold font-bold text-sm">
+          <div className="flex items-center gap-2 text-amber-500 font-bold text-sm">
             <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-gold opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-gold"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
             </span>
             LIVE
           </div>
@@ -493,31 +478,31 @@ export default function Home() {
 
         <div className="grid md:grid-cols-2 gap-8">
           {/* Card 1 */}
-          <div className="group bg-zinc-900 border border-zinc-800 p-8 rounded-[2rem] hover:border-gold/50 transition-all cursor-pointer">
+          <div className="group bg-zinc-900 border border-zinc-800 p-8 rounded-[2rem] hover:border-amber-500/50 transition-all cursor-pointer">
             <div className="flex justify-between mb-6">
               <span className="text-xs bg-zinc-800 px-3 py-1 rounded-full text-zinc-400 font-bold uppercase tracking-wider">연애/이별</span>
-              <span className="text-gold font-black italic">AI 판결중...</span>
+              <span className="text-amber-500 font-black italic">AI 판결중...</span>
             </div>
-            <h4 className="text-2xl font-bold mb-4 group-hover:text-gold transition">"남사친이랑 인생네컷 찍은 여친, 이거 제가 예민한가요?"</h4>
+            <h4 className="text-2xl font-bold mb-4 group-hover:text-amber-500 transition">"남사친이랑 인생네컷 찍은 여친, 이거 제가 예민한가요?"</h4>
             <div className="space-y-4">
               <div className="w-full bg-zinc-800 h-3 rounded-full overflow-hidden flex">
-                <div className="bg-gold h-full w-[82%] shadow-[0_0_15px_rgba(212,175,55,0.5)]"></div>
+                <div className="bg-amber-500 h-full w-[82%] shadow-[0_0_15px_rgba(245,158,11,0.5)]"></div>
                 <div className="bg-zinc-700 h-full w-[18%]"></div>
               </div>
               <div className="flex justify-between text-sm font-bold uppercase tracking-tighter">
-                <span className="text-gold">유죄 (82%)</span>
+                <span className="text-amber-500">유죄 (82%)</span>
                 <span className="text-zinc-500">무죄 (18%)</span>
               </div>
             </div>
           </div>
 
           {/* Card 2 */}
-          <div className="group bg-zinc-900 border border-zinc-800 p-8 rounded-[2rem] hover:border-gold/50 transition-all cursor-pointer">
+          <div className="group bg-zinc-900 border border-zinc-800 p-8 rounded-[2rem] hover:border-amber-500/50 transition-all cursor-pointer">
             <div className="flex justify-between mb-6">
               <span className="text-xs bg-zinc-800 px-3 py-1 rounded-full text-zinc-400 font-bold uppercase tracking-wider">직장 생활</span>
               <span className="text-red-500 font-black italic underline decoration-2 underline-offset-4">최종 판결: 피고 유죄</span>
             </div>
-            <h4 className="text-2xl font-bold mb-4 group-hover:text-gold transition">"신입사원이 메신저 답장 '넵' 대신 '네'라고 합니다."</h4>
+            <h4 className="text-2xl font-bold mb-4 group-hover:text-amber-500 transition">"신입사원이 메신저 답장 '넵' 대신 '네'라고 합니다."</h4>
             <div className="space-y-4">
               <div className="w-full bg-zinc-800 h-3 rounded-full overflow-hidden flex">
                 <div className="bg-red-600 h-full w-[15%]"></div>
@@ -550,8 +535,8 @@ export default function Home() {
           <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-zinc-800 bg-zinc-950 shadow-[0_0_60px_rgba(0,0,0,0.7)]">
             <div className="p-6 md:p-8 border-b border-zinc-900 flex items-start justify-between gap-6">
               <div>
-                <div className="inline-flex items-center gap-2 text-xs font-black tracking-widest uppercase text-gold">
-                  <span className="h-2 w-2 rounded-full bg-gold shadow-[0_0_18px_rgba(212,175,55,0.6)]" />
+                <div className="inline-flex items-center gap-2 text-xs font-black tracking-widest uppercase text-amber-500">
+                  <span className="h-2 w-2 rounded-full bg-amber-500 shadow-[0_0_18px_rgba(245,158,11,0.6)]" />
                   사건 접수
                 </div>
                 <h2 className="mt-2 text-2xl md:text-3xl font-black tracking-tighter">
@@ -564,7 +549,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={closeAccuse}
-                className="shrink-0 rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm font-black text-zinc-200 hover:border-gold/50 hover:text-gold transition"
+                className="shrink-0 rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm font-black text-zinc-200 hover:border-amber-500/50 hover:text-amber-500 transition"
                 aria-label="닫기"
               >
                 닫기
@@ -582,7 +567,7 @@ export default function Home() {
                     value={form.title}
                     onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
                     disabled={isReviewing}
-                    className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-gold/60 focus:ring-2 focus:ring-gold/10 transition"
+                    className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 transition"
                     placeholder="예: 술자리에서 한 말로 3일째 싸우는 중"
                     maxLength={80}
                     required
@@ -600,7 +585,7 @@ export default function Home() {
                         setForm((p) => ({ ...p, plaintiff: e.target.value }))
                       }
                       disabled={isReviewing}
-                      className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-gold/60 focus:ring-2 focus:ring-gold/10 transition"
+                      className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 transition"
                       placeholder="예: 익명 원고"
                       maxLength={30}
                       required
@@ -616,7 +601,7 @@ export default function Home() {
                         setForm((p) => ({ ...p, defendant: e.target.value }))
                       }
                       disabled={isReviewing}
-                      className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-gold/60 focus:ring-2 focus:ring-gold/10 transition"
+                      className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 transition"
                       placeholder="예: 익명 피고"
                       maxLength={30}
                       required
@@ -632,7 +617,7 @@ export default function Home() {
                     value={form.details}
                     onChange={(e) => setForm((p) => ({ ...p, details: e.target.value }))}
                     disabled={isReviewing}
-                    className="mt-2 w-full min-h-[160px] resize-y rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-gold/60 focus:ring-2 focus:ring-gold/10 transition"
+                    className="mt-2 w-full min-h-[160px] resize-y rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 transition"
                     placeholder={`언제/어디서/누가/무슨 말을/무슨 행동을 했는지 순서대로 적으세요.\n정리 안 하면 판사도 안 봅니다.`}
                     maxLength={5000}
                     required
@@ -662,7 +647,7 @@ export default function Home() {
                       if (f) setImagePreviewUrl(URL.createObjectURL(f));
                       setUploadError(null);
                     }}
-                    className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 file:mr-4 file:rounded-xl file:border-0 file:bg-gold file:px-4 file:py-2 file:text-black file:font-bold file:cursor-pointer outline-none focus:border-gold/60 transition disabled:opacity-60"
+                    className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 file:mr-4 file:rounded-xl file:border-0 file:bg-amber-500 file:px-4 file:py-2 file:text-black file:font-bold file:cursor-pointer outline-none focus:border-amber-500/60 transition disabled:opacity-60"
                   />
                   {imagePreviewUrl ? (
                     <div className="mt-3 flex items-start gap-3">
@@ -698,18 +683,18 @@ export default function Home() {
               ) : null}
 
               {isReviewing ? (
-                <div className="rounded-2xl border border-gold/30 bg-gold/10 px-4 py-4 text-gold/90">
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-4 text-amber-200">
                   <div className="flex items-center gap-3">
                     <div
-                      className="h-5 w-5 rounded-full border-2 border-gold/30 border-t-gold animate-spin"
+                      className="h-5 w-5 rounded-full border-2 border-amber-300/30 border-t-amber-300 animate-spin"
                       aria-hidden="true"
                     />
                     <div className="font-black">AI 판사가 기록을 검토 중입니다...</div>
                   </div>
                   <div className="mt-3 grid gap-2">
-                    <div className="h-3 w-5/6 rounded-full bg-gold/10 animate-pulse" />
-                    <div className="h-3 w-4/6 rounded-full bg-gold/10 animate-pulse" />
-                    <div className="h-3 w-3/6 rounded-full bg-gold/10 animate-pulse" />
+                    <div className="h-3 w-5/6 rounded-full bg-amber-200/10 animate-pulse" />
+                    <div className="h-3 w-4/6 rounded-full bg-amber-200/10 animate-pulse" />
+                    <div className="h-3 w-3/6 rounded-full bg-amber-200/10 animate-pulse" />
                   </div>
                 </div>
               ) : null}
@@ -719,9 +704,9 @@ export default function Home() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="inline-flex items-center gap-2 text-xs font-black tracking-widest uppercase">
-                        <span className="text-gold">판결문</span>
+                        <span className="text-amber-500">판결문</span>
                         {judgeResult.mock ? (
-                          <span className="rounded-full border border-gold/40 bg-gold/10 px-2 py-0.5 text-gold/90">
+                          <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-200">
                             MOCK
                           </span>
                         ) : (
@@ -768,7 +753,7 @@ export default function Home() {
                       </div>
                       <div className="mt-3 w-full bg-zinc-800 h-3 rounded-full overflow-hidden flex">
                         <div
-                          className="bg-gold h-full shadow-[0_0_15px_rgba(212,175,55,0.35)]"
+                          className="bg-amber-500 h-full shadow-[0_0_15px_rgba(245,158,11,0.35)]"
                           style={{ width: `${judgeResult.verdict.ratio.plaintiff}%` }}
                         />
                         <div
@@ -781,11 +766,11 @@ export default function Home() {
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-gold/25 bg-gold/10 p-4">
-                      <div className="text-xs font-black tracking-widest uppercase text-gold/90">
+                    <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4">
+                      <div className="text-xs font-black tracking-widest uppercase text-amber-200">
                         최종 판결
                       </div>
-                      <div className="mt-2 text-sm md:text-base font-bold text-gold/95 leading-relaxed whitespace-pre-wrap">
+                      <div className="mt-2 text-sm md:text-base font-bold text-amber-50 leading-relaxed whitespace-pre-wrap">
                         {judgeResult.verdict.verdict}
                       </div>
                     </div>
@@ -814,7 +799,7 @@ export default function Home() {
                 <button
                   type="submit"
                   disabled={!canSubmit}
-                  className="w-full md:w-auto rounded-2xl bg-gold px-6 py-4 font-black text-black hover:bg-gold-light transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full md:w-auto rounded-2xl bg-amber-500 px-6 py-4 font-black text-black hover:bg-amber-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   판결 요청
                 </button>
@@ -876,14 +861,14 @@ export default function Home() {
                 tabIndex={0}
                 onClick={() => setSelectedPost(p)}
                 onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
-                className="group rounded-[1.75rem] border border-zinc-900 bg-zinc-950 p-5 hover:border-gold/40 transition-all cursor-pointer select-none"
+                className="group rounded-[1.75rem] border border-zinc-900 bg-zinc-950 p-5 hover:border-amber-500/40 transition-all cursor-pointer select-none"
               >
                 <div className="flex items-start justify-between gap-3 mb-3">
-                  <h4 className="text-base md:text-lg font-bold group-hover:text-gold transition">
+                  <h4 className="text-base md:text-lg font-bold group-hover:text-amber-400 transition">
                     {p.title}
                   </h4>
                   {typeof p.ratio === "number" ? (
-                    <span className="text-xs font-black text-gold">
+                    <span className="text-xs font-black text-amber-400">
                       피고 과실 {p.ratio}% 
                     </span>
                   ) : null}
@@ -956,7 +941,7 @@ export default function Home() {
           />
           <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-zinc-800 bg-zinc-950 shadow-[0_0_60px_rgba(0,0,0,0.8)]">
             <div className="sticky top-0 z-10 flex items-center justify-between gap-4 p-6 border-b border-zinc-800 bg-zinc-950">
-              <h3 className="text-lg font-black text-gold">판결문 상세</h3>
+              <h3 className="text-lg font-black text-amber-500">판결문 상세</h3>
               <button
                 type="button"
                 onClick={() => setSelectedPost(null)}
@@ -998,8 +983,8 @@ export default function Home() {
                 </div>
               ) : null}
               {typeof selectedPost.ratio === "number" ? (
-                <div className="rounded-2xl border border-gold/30 bg-gold/10 px-4 py-3">
-                  <span className="text-sm font-black text-gold/90">피고 과실 {selectedPost.ratio}%</span>
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+                  <span className="text-sm font-black text-amber-200">피고 과실 {selectedPost.ratio}%</span>
                 </div>
               ) : null}
               <div>
@@ -1011,7 +996,7 @@ export default function Home() {
               {selectedPost.punchline ? (
                 <div>
                   <div className="text-xs font-black tracking-widest uppercase text-zinc-500 mb-2">판사의 한마디</div>
-                  <p className="text-base md:text-lg font-bold text-gold/95 leading-relaxed">
+                  <p className="text-base md:text-lg font-bold text-amber-100 leading-relaxed">
                     “{selectedPost.punchline}”
                   </p>
                 </div>
@@ -1032,14 +1017,14 @@ export default function Home() {
                     disabled={commentSubmitting}
                     placeholder="익명으로 반론을 남기세요 (최대 2000자)"
                     maxLength={2000}
-                    className="w-full min-h-[80px] resize-y rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-gold/60 focus:ring-2 focus:ring-gold/10 transition disabled:opacity-60"
+                    className="w-full min-h-[80px] resize-y rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 transition disabled:opacity-60"
                   />
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-zinc-500">{commentInput.length}/2000</span>
                     <button
                       type="submit"
                       disabled={!commentInput.trim() || commentSubmitting}
-                      className="rounded-xl bg-gold px-4 py-2 text-sm font-bold text-black hover:bg-gold-light transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-black hover:bg-amber-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {commentSubmitting ? "등록 중..." : "반론 등록"}
                     </button>
