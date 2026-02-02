@@ -27,6 +27,11 @@ function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.trim().length > 0;
 }
 
+function isRlsError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /row-level security|policy|RLS/i.test(msg);
+}
+
 /** 금지어·부적절 내용 포함 시 true (판결불가) */
 function isForbiddenOrInappropriate(req: JudgeRequest): boolean {
   const combined = `${req.title} ${req.plaintiff} ${req.defendant} ${req.details}`.toLowerCase();
@@ -271,8 +276,13 @@ export async function POST(request: Request) {
       });
 
       if (error) {
-        console.error("DB_INSERT_ERROR:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        if (isRlsError(error)) {
+          return NextResponse.json(
+            { ok: false, error: "데이터를 저장할 수 없습니다. RLS 설정을 확인해 주세요." },
+            { status: 403 }
+          );
+        }
+        return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
       }
       return NextResponse.json({ ok: true, status: "판결불가", verdict: null });
     }
@@ -316,8 +326,13 @@ export async function POST(request: Request) {
     });
 
     if (error) {
-      console.error("DB_INSERT_ERROR:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      if (isRlsError(error)) {
+        return NextResponse.json(
+          { ok: false, error: "판결문을 저장할 수 없습니다. RLS 설정을 확인해 주세요." },
+          { status: 403 }
+        );
+      }
+      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true, mock: !hasGemini, verdict });

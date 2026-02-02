@@ -32,9 +32,10 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 ## Supabase 설정
 
 - **posts 테이블**: `image_url` 컬럼 추가 (text, nullable). 기소 시 첨부 이미지 URL 저장.
-- **comments 테이블**: 익명 댓글(반론)용.  
+- **comments 테이블**: 배심원 한마디(대댓글 지원).  
   - `id` (uuid, PK, default gen_random_uuid())  
   - `post_id` (uuid, FK → posts.id)  
+  - `parent_id` (uuid, nullable, FK → comments.id, 대댓글일 때 부모 댓글 id)  
   - `content` (text)  
   - `created_at` (timestamptz, default now())
 - **Storage**: 버킷 `gaepan-images` 생성 후 Public으로 설정. 업로드 정책에서 anon INSERT 허용.
