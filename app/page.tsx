@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
@@ -115,7 +115,7 @@ function toRatioNumber(value: unknown): number | null {
     verdict: string;
   };
 
-export default function Home() {
+function HomeContent() {
   const [isMobilePreview, setIsMobilePreview] = useState(false);
   
   useEffect(() => {
@@ -3757,5 +3757,19 @@ export default function Home() {
       ) : null}
     </div>
     </>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+          <p className="text-zinc-500 text-sm">로딩 중...</p>
+        </div>
+      }
+    >
+      <HomeContent />
+    </Suspense>
   );
 }
