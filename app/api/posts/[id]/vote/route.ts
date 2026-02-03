@@ -3,24 +3,19 @@ import { createSupabaseServerClient } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
-function isRlsError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return /row-level security|policy|RLS/i.test(msg);
-}
-
 export async function PATCH(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { id } = await params;
-    if (!id) {
+    const { id: postId } = await params;
+    if (!postId?.trim()) {
       return NextResponse.json({ error: "Missing post id" }, { status: 400 });
     }
 
-    let body: { type?: string; previousVote?: string | null } = {};
+    let body: { type?: string } = {};
     try {
-      body = (await _request.json()) as typeof body;
+      body = (await request.json()) as { type?: string };
     } catch {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
@@ -29,80 +24,115 @@ export async function PATCH(
     if (type !== "guilty" && type !== "not_guilty") {
       return NextResponse.json(
         { error: "Body must include type: 'guilty' or 'not_guilty'" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const previousVote =
-      body.previousVote === "guilty" || body.previousVote === "not_guilty"
-        ? body.previousVote
-        : null;
+    // IP 기준 제한
+    const ip =
+      request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+      request.headers.get("cf-connecting-ip") ||
+      request.headers.get("x-real-ip") ||
+      "unknown";
 
     const supabase = createSupabaseServerClient();
+
+    const { data: existing, error: existingError } = await supabase
+      .from("votes")
+      .select("id, choice")
+      .eq("post_id", postId)
+      .eq("ip_address", ip)
+      .maybeSingle();
+
+    if (existingError) {
+      return NextResponse.json({ error: existingError.message }, { status: 500 });
+    }
+
     const { data: row, error: fetchError } = await supabase
       .from("posts")
-      .select("guilty, not_guilty")
-      .eq("id", id)
+      .select("guilty, not_guilty, title")
+      .eq("id", postId)
       .single();
 
     if (fetchError || !row) {
-      if (isRlsError(fetchError)) {
-        return NextResponse.json(
-          { error: "데이터를 불러올 수 없습니다. RLS 설정을 확인해 주세요." },
-          { status: 403 }
-        );
+      return NextResponse.json({ error: "Post not found" }, { status: 404 });
+    }
+
+    let currentGuilty = Number(row.guilty) || 0;
+    let currentNotGuilty = Number(row.not_guilty) || 0;
+
+    let nextChoice: "guilty" | "not_guilty" | null = type;
+
+    if (!existing) {
+      // 최초 투표: 선택한 방향으로 +1
+      if (type === "guilty") currentGuilty += 1;
+      else currentNotGuilty += 1;
+
+      const { error: insertError } = await supabase
+        .from("votes")
+        .insert({ post_id: postId, ip_address: ip, choice: type });
+      if (insertError) {
+        return NextResponse.json({ error: insertError.message }, { status: 500 });
       }
-      return NextResponse.json(
-        { error: "Post not found" },
-        { status: 404 }
-      );
-    }
+      await supabase.from("vote_events").insert({
+        post_id: postId,
+        post_title: (row as { title?: string })?.title ?? null,
+        vote_type: type,
+        voter_display: "익명 배심원(Lv.1)",
+      });
+    } else if (existing.choice === type) {
+      // 같은 버튼 재클릭 → 투표 취소
+      if (type === "guilty" && currentGuilty > 0) currentGuilty -= 1;
+      if (type === "not_guilty" && currentNotGuilty > 0) currentNotGuilty -= 1;
+      nextChoice = null;
 
-    let currentGuilty = Math.max(0, Number(row.guilty) || 0);
-    let currentNotGuilty = Math.max(0, Number(row.not_guilty) || 0);
+      const { error: deleteError } = await supabase
+        .from("votes")
+        .delete()
+        .eq("id", existing.id);
+      if (deleteError) {
+        return NextResponse.json({ error: deleteError.message }, { status: 500 });
+      }
+    } else {
+      // 다른 쪽으로 변경
+      if (existing.choice === "guilty" && currentGuilty > 0) currentGuilty -= 1;
+      if (existing.choice === "not_guilty" && currentNotGuilty > 0) currentNotGuilty -= 1;
+      if (type === "guilty") currentGuilty += 1;
+      if (type === "not_guilty") currentNotGuilty += 1;
+      nextChoice = type;
 
-    // 취소: 같은 버튼 다시 클릭 -> 해당 값 -1
-    if (previousVote === type) {
-      if (type === "guilty") currentGuilty = Math.max(0, currentGuilty - 1);
-      else currentNotGuilty = Math.max(0, currentNotGuilty - 1);
-    }
-    // 변경: 다른 버튼 클릭 -> 이전 -1, 새로 +1
-    else if (previousVote) {
-      if (previousVote === "guilty") currentGuilty = Math.max(0, currentGuilty - 1);
-      else currentNotGuilty = Math.max(0, currentNotGuilty - 1);
-      if (type === "guilty") currentGuilty += 1;
-      else currentNotGuilty += 1;
-    }
-    // 신규: +1
-    else {
-      if (type === "guilty") currentGuilty += 1;
-      else currentNotGuilty += 1;
+      const { error: updateVoteError } = await supabase
+        .from("votes")
+        .update({ choice: type })
+        .eq("id", existing.id);
+      if (updateVoteError) {
+        return NextResponse.json({ error: updateVoteError.message }, { status: 500 });
+      }
+      await supabase.from("vote_events").insert({
+        post_id: postId,
+        post_title: (row as { title?: string })?.title ?? null,
+        vote_type: type,
+        voter_display: "익명 배심원(Lv.1)",
+      });
     }
 
     const { error: updateError } = await supabase
       .from("posts")
       .update({ guilty: currentGuilty, not_guilty: currentNotGuilty })
-      .eq("id", id);
+      .eq("id", postId);
 
     if (updateError) {
-      if (isRlsError(updateError)) {
-        return NextResponse.json(
-          { error: "투표를 반영할 수 없습니다. RLS 설정을 확인해 주세요." },
-          { status: 403 }
-        );
-      }
-      return NextResponse.json(
-        { error: updateError.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
 
     return NextResponse.json({
       guilty: currentGuilty,
       not_guilty: currentNotGuilty,
+      currentVote: nextChoice,
     });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+
