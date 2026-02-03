@@ -7,7 +7,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 const notoSerif = Noto_Serif_KR({
   weight: ["400", "600", "700"],
-  subsets: ["latin", "korean"],
+  subsets: ["latin"],
   display: "swap",
 });
 
