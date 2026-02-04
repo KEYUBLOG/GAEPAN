@@ -1799,7 +1799,7 @@ function HomeContent() {
       {/* 실시간 사법 전광판 */}
       <div className="max-w-7xl mx-auto px-4 md:px-8 mt-4 md:mt-6 mb-4">
         <div className="bg-black/40 backdrop-blur-md border border-zinc-800/60 rounded-2xl px-4 py-4 md:px-6 md:py-5 shadow-[0_0_30px_rgba(0,0,0,0.6)]">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-4 mb-3 text-center">
             <h3 className="text-[11px] md:text-xs font-semibold tracking-[0.2em] uppercase text-zinc-400">
               실시간 사법 전광판
             </h3>
@@ -1808,9 +1808,9 @@ function HomeContent() {
             </p>
           </div>
           {todayStatsError ? (
-            <p className="text-[11px] text-red-400">{todayStatsError}</p>
+            <p className="text-[11px] text-red-400 text-center">{todayStatsError}</p>
           ) : (
-            <div className="grid grid-cols-2 gap-4 md:flex md:flex-row md:divide-x md:divide-zinc-800">
+            <div className="grid grid-cols-2 gap-4 md:flex md:flex-row md:flex-wrap md:justify-center md:divide-x md:divide-zinc-800">
               <div className="flex flex-col items-center justify-center md:px-4 text-center">
                 <span className="text-[11px] text-zinc-500 mb-1">오늘 확정된 사건</span>
                 <div className="text-xl md:text-2xl font-black">
