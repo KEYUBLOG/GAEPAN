@@ -231,6 +231,15 @@ export async function POST(request: Request) {
     const rawPassword =
       typeof (body as any)?.password === "string" ? (body as any).password.trim() : "";
 
+    // 서버 로그: 기소장 기본 정보 (비밀번호/원문 전문은 남기지 않음)
+    console.log("[GAEPAN][POST /api/judge] incoming request", {
+      title: title?.slice(0, 50) ?? null,
+      detailsLength: typeof details === "string" ? details.length : null,
+      hasImage: typeof image_url === "string" && image_url.length > 0,
+      category: rawCategory ?? null,
+      trial_type: body?.trial_type ?? null,
+    });
+
     if (!rawPassword) {
       return NextResponse.json(
         { ok: false, error: "삭제용 비밀번호를 입력해 주세요." },
@@ -296,13 +305,29 @@ export async function POST(request: Request) {
     let verdict: JudgeVerdict;
     if (hasGemini) {
       try {
+        console.log("[GAEPAN][POST /api/judge] calling Gemini with trial_type=", trial_type);
         verdict = await callGemini(req);
+        console.log("[GAEPAN][POST /api/judge] Gemini verdict", {
+          title: verdict.title?.slice(0, 80),
+          ratio: verdict.ratio,
+          verdict: verdict.verdict?.slice(0, 120),
+        });
       } catch (geminiErr) {
         console.error("[GAEPAN] callGemini failed", geminiErr);
         verdict = buildMockVerdict(req);
+        console.log("[GAEPAN][POST /api/judge] using MOCK verdict instead", {
+          title: verdict.title?.slice(0, 80),
+          ratio: verdict.ratio,
+          verdict: verdict.verdict?.slice(0, 120),
+        });
       }
     } else {
       verdict = buildMockVerdict(req);
+      console.log("[GAEPAN][POST /api/judge] GEMINI_API_KEY missing, using MOCK verdict", {
+        title: verdict.title?.slice(0, 80),
+        ratio: verdict.ratio,
+        verdict: verdict.verdict?.slice(0, 120),
+      });
     }
 
     const { data: maxRow } = await supabase
@@ -316,10 +341,20 @@ export async function POST(request: Request) {
         ? Number(maxRow.case_number) + 1
         : 1;
 
+    const rationaleToSave =
+      typeof verdict.ratio?.rationale === "string" ? verdict.ratio.rationale : null;
+    console.log("[GAEPAN][POST /api/judge] inserting post into DB", {
+      caseNumberCandidate: nextCaseNumber,
+      ratioDefendant: verdict.ratio.defendant,
+      verdict_rationaleLength: rationaleToSave?.length ?? 0,
+      verdict_rationalePreview: rationaleToSave?.slice(0, 80) ?? null,
+    });
+
     const { error } = await supabase.from("posts").insert({
       title: verdict.title,
       content: req.details,
       verdict: verdict.verdict,
+      verdict_rationale: rationaleToSave,
       ratio: Number(verdict.ratio.defendant),
       plaintiff: req.plaintiff,
       defendant: req.defendant,
@@ -336,12 +371,23 @@ export async function POST(request: Request) {
 
     if (error) {
       console.error("[GAEPAN] DB_INSERT_ERROR:", error);
+      if (
+        error.message?.includes("verdict_rationale") ||
+        error.message?.toLowerCase().includes("column")
+      ) {
+        console.error(
+          "[GAEPAN] DB에 verdict_rationale 컬럼이 없을 수 있습니다. Supabase SQL Editor에서 sql/add_verdict_rationale.sql 을 실행하세요."
+        );
+      }
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
+
+    console.log("[GAEPAN][POST /api/judge] insert success");
 
     return NextResponse.json({ ok: true, mock: !hasGemini, verdict });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";
+    console.error("[GAEPAN][POST /api/judge] unhandled error", e);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }

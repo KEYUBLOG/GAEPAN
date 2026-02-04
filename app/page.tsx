@@ -182,6 +182,8 @@ function HomeContent() {
     defendant: string | null;
     content: string | null;
     verdict: string;
+    /** 기소 직후 판결문에 나오는 긴 설명문 (ratio.rationale). 없으면 빈 문자열 */
+    verdict_rationale: string;
     ratio: number | null;
     created_at: string | null;
     guilty: number;
@@ -412,7 +414,7 @@ function HomeContent() {
     const supabase = getSupabaseBrowserClient();
     supabase
       .from("posts")
-      .select("*")
+      .select("*, verdict_rationale")
       .eq("id", postId)
       .maybeSingle()
       .then(({ data: row, error }) => {
@@ -424,6 +426,12 @@ function HomeContent() {
           defendant: ((row as any).defendant as string | null) ?? null,
           content: ((row as any).content as string | null) ?? null,
           verdict: ((row as any).verdict as string) ?? "",
+          verdict_rationale:
+            (typeof (row as any).verdict_rationale === "string"
+              ? (row as any).verdict_rationale
+              : typeof (row as any).verdictRationale === "string"
+                ? (row as any).verdictRationale
+                : "") ?? "",
           ratio: toRatioNumber((row as any).ratio),
           created_at: ((row as any).created_at as string | null) ?? null,
           guilty: Number((row as any).guilty) || 0,
@@ -499,6 +507,12 @@ function HomeContent() {
       defendant: (row.defendant as string | null) ?? null,
       content: (row.content as string | null) ?? null,
       verdict: (row.verdict as string) ?? "",
+      verdict_rationale:
+        (typeof row.verdict_rationale === "string"
+          ? row.verdict_rationale
+          : typeof (row as Record<string, unknown>).verdictRationale === "string"
+            ? String((row as Record<string, unknown>).verdictRationale)
+            : "") as string,
       ratio: toRatioNumber(row.ratio),
       created_at: (row.created_at as string | null) ?? null,
       guilty: Number(row.guilty) || 0,
@@ -523,16 +537,17 @@ function HomeContent() {
       setIsLoadingPosts(true);
       setPostsError(null);
       try {
+        const postColumns = "id, title, plaintiff, defendant, content, verdict, verdict_rationale, ratio, created_at, guilty, not_guilty, image_url, author_id, case_number, category, trial_type, voting_ended_at";
         const [{ data: topData, error: topError }, { data: listData, error: listError }] = await Promise.all([
           supabase
             .from("posts")
-            .select("*")
+            .select(postColumns)
             .neq("status", "판결불가")
             .order("guilty", { ascending: false })
             .limit(1),
           supabase
             .from("posts")
-            .select("*")
+            .select(postColumns)
             .neq("status", "판결불가")
             .order("created_at", { ascending: false })
             .limit(10),
@@ -892,10 +907,13 @@ function HomeContent() {
     setJudgeResult(null);
     setJudgeError(null);
 
-    console.log("[GAEPAN] 기소장 접수", {
-      사건제목: form.title.trim(),
-      사건경위: form.details.trim(),
-      submittedAt: new Date().toISOString(),
+    const submittedAt = new Date().toISOString();
+    console.log("[GAEPAN][Accuse] submit", {
+      title: form.title.trim().slice(0, 50),
+      detailsLength: form.details.trim().length,
+      category: form.category,
+      trial_type: form.trial_type,
+      submittedAt,
     });
 
     try {
@@ -925,6 +943,7 @@ function HomeContent() {
         }
       }
 
+      console.log("[GAEPAN][Accuse] calling /api/judge");
       const r = await fetch("/api/judge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -953,20 +972,39 @@ function HomeContent() {
         data = null;
       }
 
+      console.log("[GAEPAN][Accuse] /api/judge response meta", {
+        status: r.status,
+        ok: r.ok,
+        hasBody: !!data,
+        type: data && "status" in data ? data.status : "verdict",
+      });
+
       if (!r.ok || !data || !data.ok) {
         const msg = (data && "error" in data && data.error) || `요청 실패 (${r.status} ${r.statusText})`;
         setJudgeError(msg);
+        console.error("[GAEPAN][Accuse] judge error", msg);
         return;
       }
 
       if ("status" in data && data.status === "판결불가") {
         setJudgeError("금지어 또는 부적절한 내용이 포함되어 판결이 불가합니다.");
+        console.warn("[GAEPAN][Accuse] 판결불가 응답", data);
         return;
       }
 
+      const verdictPayload = (data as any).verdict as JudgeVerdict;
+      console.log("[GAEPAN][Accuse] judge verdict received", {
+        title: verdictPayload?.title?.slice(0, 80),
+        ratio: verdictPayload?.ratio,
+        verdict: verdictPayload?.verdict?.slice(0, 120),
+        hasRationale:
+          typeof verdictPayload?.ratio?.rationale === "string" &&
+          verdictPayload.ratio.rationale.length > 0,
+      });
+
       setJudgeResult({
         mock: (data as any).mock ?? false,
-        verdict: (data as any).verdict,
+        verdict: verdictPayload,
         imageUrl: imageUrl && imageUrl.length > 0 ? imageUrl : null,
       });
     } catch (err) {
@@ -1076,6 +1114,39 @@ function HomeContent() {
   const openReportModal = (targetType: "post" | "comment", targetId: string) => {
     setReportTarget({ type: targetType, id: targetId });
     setReportReason("욕설/비하");
+  };
+
+  /** 판결문 공유: 로컬에서는 링크 복사만, 배포 환경에서는 Web Share API 또는 링크 복사 */
+  const sharePost = async (postId: string, title: string) => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const url = `${origin}/?post=${postId}`;
+    const shareTitle = title || "개판 - AI 법정 판결문";
+    const text = `${shareTitle} - 개판에서 AI 대법관과 배심원의 판결을 확인하세요.`;
+    const isLocal = /localhost|127\.0\.0\.1/.test(origin);
+    try {
+      if (!isLocal && typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share({ title: shareTitle, url, text });
+        setPostMenuOpenId(null);
+        return;
+      }
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        window.alert(
+          isLocal
+            ? "로컬 환경: 링크가 복사되었습니다. 배포(gaepanai.com) 후에는 SNS 등으로 공유할 수 있습니다."
+            : "링크가 복사되었습니다. 원하는 곳에 붙여넣어 공유하세요."
+        );
+        setPostMenuOpenId(null);
+        return;
+      }
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") {
+        setPostMenuOpenId(null);
+        return;
+      }
+    }
+    window.alert(`공유 링크 (복사하여 사용): ${url}`);
+    setPostMenuOpenId(null);
   };
 
   const closeReportModal = () => {
@@ -1857,6 +1928,16 @@ function HomeContent() {
                     </button>
                     {postMenuOpenId === filteredTopGuiltyPost.id ? (
                       <div className="absolute right-0 mt-1 w-32 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            sharePost(filteredTopGuiltyPost.id, filteredTopGuiltyPost.title);
+                          }}
+                          className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
+                        >
+                          공유하기
+                        </button>
                         {isOperatorLoggedIn ? (
                           <button
                             type="button"
@@ -1931,6 +2012,16 @@ function HomeContent() {
                   </button>
                   {postMenuOpenId === filteredTopGuiltyPost.id ? (
                     <div className="absolute right-0 mt-1 w-32 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          sharePost(filteredTopGuiltyPost.id, filteredTopGuiltyPost.title);
+                        }}
+                        className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
+                      >
+                        공유하기
+                      </button>
                       {isOperatorLoggedIn ? (
                         <button
                           type="button"
@@ -2013,6 +2104,16 @@ function HomeContent() {
                   </button>
                   {postMenuOpenId === filteredTopGuiltyPost.id ? (
                     <div className="absolute right-0 mt-1 w-32 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          sharePost(filteredTopGuiltyPost.id, filteredTopGuiltyPost.title);
+                        }}
+                        className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
+                      >
+                        공유하기
+                      </button>
                       {isOperatorLoggedIn ? (
                         <button
                           type="button"
@@ -2581,6 +2682,16 @@ function HomeContent() {
                     </button>
                     {postMenuOpenId === p.id ? (
                       <div className="absolute right-0 mt-1 w-32 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            sharePost(p.id, p.title);
+                          }}
+                          className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
+                        >
+                          공유하기
+                        </button>
                         {isOperatorLoggedIn ? (
                           <button
                             type="button"
@@ -2823,6 +2934,16 @@ function HomeContent() {
                     </button>
                     {postMenuOpenId === p.id ? (
                       <div className="absolute right-0 mt-1 w-32 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            sharePost(p.id, p.title);
+                          }}
+                          className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
+                        >
+                          공유하기
+                        </button>
                         {isOperatorLoggedIn ? (
                           <button
                             type="button"
@@ -3389,6 +3510,13 @@ function HomeContent() {
                   </button>
                   {postMenuOpenId === selectedPost.id ? (
                     <div className="absolute right-0 mt-1 w-32 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
+                      <button
+                        type="button"
+                        onClick={() => sharePost(selectedPost.id, selectedPost.title)}
+                        className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
+                      >
+                        공유하기
+                      </button>
                       {isOperatorLoggedIn ? (
                         <button
                           type="button"
@@ -3564,8 +3692,28 @@ function HomeContent() {
                           }}
                         />
                       </div>
+                      {/* AI 예측 게이지 아래: AI 상세 판결 문구 */}
+                      {(() => {
+                        const raw =
+                          selectedPost.verdict_rationale ??
+                          (selectedPost as Record<string, unknown>).verdictRationale ??
+                          "";
+                        const rationale = typeof raw === "string" ? raw : "";
+                        const displayText =
+                          rationale.trim() || "상세 판결 근거가 기록되지 않은 사건입니다.";
+                        return (
+                          <div className="mt-3 md:mt-4">
+                            <div className="text-[11px] sm:text-xs font-semibold text-amber-100/90 mb-1">
+                              AI 상세 판결
+                            </div>
+                            <p className="text-xs sm:text-base text-amber-50 leading-relaxed whitespace-pre-wrap break-words">
+                              {displayText}
+                            </p>
+                          </div>
+                        );
+                      })()}
                       <div className="mt-3 md:mt-4 text-[11px] sm:text-xs font-semibold text-amber-100/90">
-                        AI 판결 근거
+                        AI 최종 판결
                       </div>
                       <p className="mt-1 text-xs sm:text-base text-amber-50 leading-relaxed whitespace-pre-wrap break-keep">
                         {isFiftyFifty ? neutralReason : verdictText || "AI 판결 이유가 아직 준비되지 않았습니다."}
