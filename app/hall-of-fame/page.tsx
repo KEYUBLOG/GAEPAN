@@ -773,7 +773,7 @@ export default function HallOfFamePage() {
                         <div className="flex items-center gap-2 flex-wrap mb-1">
                           <span className="text-xs font-black tracking-widest uppercase text-zinc-500">사건 제목</span>
                         </div>
-                        <h4 className="text-xl md:text-2xl font-bold text-zinc-100 line-clamp-1 min-w-0 break-words">{selectedPost.title}</h4>
+                        <h4 className="text-xl md:text-2xl font-bold text-zinc-100 break-words">{selectedPost.title}</h4>
                       </div>
                       <span className="text-xs font-black tracking-widest uppercase text-zinc-500 shrink-0">
                         사건 번호 {selectedPost.case_number != null ? selectedPost.case_number : "—"}

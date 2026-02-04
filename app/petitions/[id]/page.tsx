@@ -341,7 +341,7 @@ export default function PetitionDetailPage({ params }: { params: Promise<{ id: s
               삭제
             </button>
           </div>
-          <h2 className="text-2xl font-black text-zinc-100 mb-4 pr-16 line-clamp-1 min-w-0 break-words">{petition.title}</h2>
+          <h2 className="text-2xl font-black text-zinc-100 mb-4 pr-16 break-words">{petition.title}</h2>
           <div className="text-zinc-300 leading-relaxed whitespace-pre-wrap">{petition.content}</div>
         </div>
 
