@@ -3616,9 +3616,9 @@ function HomeContent() {
                   (verdictText.includes("원고 무죄") && selectedPost.trial_type !== "ACCUSATION");
                 const notGuiltyPct = isDefense ? aiRatio : 100 - aiRatio;
                 const guiltyPct = isDefense ? 100 - aiRatio : aiRatio;
-                const primaryLabel = isDefense ? "무죄" : "유죄";
-                const primaryPct = isDefense ? notGuiltyPct : guiltyPct;
                 const isFiftyFifty = guiltyPct === 50 && notGuiltyPct === 50;
+                const primaryLabel = guiltyPct >= notGuiltyPct ? "유죄" : "무죄";
+                const primaryPct = guiltyPct >= notGuiltyPct ? guiltyPct : notGuiltyPct;
                 const neutralReason =
                   "본 사건은 원고와 피고의 주장이 법리적으로 팽팽히 맞서고 있어, 현재의 알고리즘으로는 확정적 판결을 내릴 수 없는 '법리적 난제'입니다.";
 
