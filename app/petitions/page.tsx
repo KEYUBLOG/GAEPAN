@@ -127,7 +127,7 @@ export default function PetitionsPage() {
               >
                 <div className="flex items-start justify-between gap-4 mb-3">
                   <div className="flex-1">
-                    <h3 className="text-lg font-bold text-zinc-100 mb-2">{p.title}</h3>
+                    <h3 className="text-lg font-bold text-zinc-100 mb-2 line-clamp-1 min-w-0 break-words">{p.title}</h3>
                     <p className="text-sm text-zinc-400 line-clamp-2">{p.content}</p>
                   </div>
                   {p.agree_count >= 50 ? (

@@ -49,6 +49,7 @@ type PostPreview = {
   defendant: string | null;
   content: string | null;
   verdict: string;
+  verdict_rationale: string;
   ratio: number | null;
   created_at: string | null;
   guilty: number;
@@ -135,6 +136,7 @@ export default function OngoingTrialsPage() {
   const firstFieldRef = React.useRef<HTMLInputElement | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const commentDeletePasswordRef = React.useRef<HTMLInputElement | null>(null);
+  const deletePasswordRef = React.useRef<HTMLInputElement | null>(null);
 
   // 투표 저장/로드
   useEffect(() => {
@@ -157,7 +159,7 @@ export default function OngoingTrialsPage() {
         const supabase = getSupabaseBrowserClient();
         const { data, error: listError } = await supabase
           .from("posts")
-          .select("*")
+          .select("*, verdict_rationale")
           .neq("status", "판결불가")
           .order("created_at", { ascending: false })
           .limit(100);
@@ -171,6 +173,8 @@ export default function OngoingTrialsPage() {
           defendant: (row.defendant as string | null) ?? null,
           content: (row.content as string | null) ?? null,
           verdict: (row.verdict as string) ?? "",
+          verdict_rationale:
+            (typeof row.verdict_rationale === "string" ? row.verdict_rationale : typeof (row as Record<string, unknown>).verdictRationale === "string" ? String((row as Record<string, unknown>).verdictRationale) : "") ?? "",
           ratio: toRatioNumber(row.ratio),
           created_at: (row.created_at as string | null) ?? null,
           guilty: Number(row.guilty) || 0,
@@ -298,6 +302,13 @@ export default function OngoingTrialsPage() {
     return () => clearTimeout(t);
   }, [commentDeleteTargetId]);
 
+  useEffect(() => {
+    if (!deletePostId) return;
+    setDeletePassword("");
+    const t = setTimeout(() => deletePasswordRef.current?.focus(), 100);
+    return () => clearTimeout(t);
+  }, [deletePostId]);
+
   const submitComment = async (e: React.FormEvent) => {
     e.preventDefault();
     const pw = commentFormPassword.trim();
@@ -381,6 +392,86 @@ export default function OngoingTrialsPage() {
       if (typeof window !== "undefined") {
         window.alert(err instanceof Error ? err.message : "신고 처리 중 오류가 발생했습니다.");
       }
+    }
+  };
+
+  const sharePost = async (postId: string, title: string) => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const pathname = typeof window !== "undefined" ? window.location.pathname : "/trials/ongoing";
+    const url = `${origin}${pathname}?post=${postId}`;
+    const shareTitle = title || "개판 - AI 법정 판결문";
+    const text = `${shareTitle} - 개판에서 AI 대법관과 배심원의 판결을 확인하세요.`;
+    const isLocal = /localhost|127\.0\.0\.1/.test(origin);
+    try {
+      if (!isLocal && typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share({ title: shareTitle, url, text });
+        setPostMenuOpenId(null);
+        return;
+      }
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        window.alert(isLocal ? "로컬 환경: 링크가 복사되었습니다. 배포 후에는 SNS 등으로 공유할 수 있습니다." : "링크가 복사되었습니다. 원하는 곳에 붙여넣어 공유하세요.");
+        setPostMenuOpenId(null);
+        return;
+      }
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") {
+        setPostMenuOpenId(null);
+        return;
+      }
+    }
+    window.alert(`공유 링크 (복사하여 사용): ${url}`);
+    setPostMenuOpenId(null);
+  };
+
+  const closeDeleteModal = () => {
+    setDeletePostId(null);
+    setDeletePassword("");
+    setDeleteSubmitting(false);
+    setPostMenuOpenId(null);
+  };
+
+  const handleDeletePost = async (postId: string, password: string) => {
+    if (typeof window === "undefined") return;
+    if (!postId?.trim()) return;
+    const trimmed = password.trim();
+    if (!trimmed) {
+      window.alert("판결문 수정 및 삭제 비밀번호를 입력해 주세요.");
+      return;
+    }
+    setDeleteSubmitting(true);
+    try {
+      const r = await fetch(`/api/posts/${postId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: trimmed }),
+      });
+      const raw = await r.text();
+      let data: { ok?: boolean; error?: string } | null = null;
+      try {
+        data = raw ? (JSON.parse(raw) as { ok?: boolean; error?: string }) : null;
+      } catch {
+        // ignore
+      }
+      if (!r.ok) {
+        const msg = data?.error ?? `판결문 삭제에 실패했습니다. (${r.status})`;
+        window.alert(msg);
+        setDeleteSubmitting(false);
+        return;
+      }
+      if (data && data.ok === false) {
+        window.alert(data?.error ?? "판결문 삭제에 실패했습니다.");
+        setDeleteSubmitting(false);
+        return;
+      }
+      setPosts((prev) => prev.filter((p) => p.id !== postId));
+      setSelectedPost((prev) => (prev?.id === postId ? null : prev));
+      closeDeleteModal();
+      window.alert("판결문이 삭제되었습니다.");
+    } catch (err) {
+      console.error("[handleDeletePost]", err);
+      window.alert("판결문 삭제 중 오류가 발생했습니다.");
+      setDeleteSubmitting(false);
     }
   };
 
@@ -722,7 +813,7 @@ export default function OngoingTrialsPage() {
                       [🔥 판결 임박]
                     </span>
                   ) : null}
-                  <h4 className="text-lg md:text-2xl font-bold group-hover:text-amber-400 transition line-clamp-2 text-center mb-3 break-words">
+                  <h4 className="text-lg md:text-2xl font-bold group-hover:text-amber-400 transition line-clamp-1 text-center mb-3 break-words">
                     {p.title}
                   </h4>
 
@@ -923,7 +1014,7 @@ export default function OngoingTrialsPage() {
                           ) : null}
                           <span className="text-xs font-black tracking-widest uppercase text-zinc-500">사건 제목</span>
                         </div>
-                        <h4 className="text-xl md:text-2xl font-bold text-zinc-100">{selectedPost.title}</h4>
+                        <h4 className="text-xl md:text-2xl font-bold text-zinc-100 line-clamp-1 min-w-0 break-words">{selectedPost.title}</h4>
                       </div>
                       <span className="text-xs font-black tracking-widest uppercase text-zinc-500 shrink-0">
                         사건 번호 {selectedPost.case_number != null ? selectedPost.case_number : "—"}
@@ -1022,6 +1113,13 @@ export default function OngoingTrialsPage() {
                   </button>
                   {postMenuOpenId === selectedPost.id ? (
                     <div className="absolute right-0 mt-1 w-32 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
+                      <button
+                        type="button"
+                        onClick={() => sharePost(selectedPost.id, selectedPost.title)}
+                        className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
+                      >
+                        공유하기
+                      </button>
                       {isOperatorLoggedIn ? (
                         <button
                           type="button"
@@ -1044,31 +1142,59 @@ export default function OngoingTrialsPage() {
                           ⚖️ 삭제
                         </button>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            openReportModal("post", selectedPost.id);
-                            setPostMenuOpenId(null);
-                          }}
-                          className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
-                        >
-                          신고하기
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeletePostId(selectedPost.id);
+                              setPostMenuOpenId(null);
+                            }}
+                            className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
+                          >
+                            판결문 삭제
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              openReportModal("post", selectedPost.id);
+                              setPostMenuOpenId(null);
+                            }}
+                            className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
+                          >
+                            신고하기
+                          </button>
+                        </>
                       )}
                     </div>
                   ) : null}
                 </div>
               </div>
-              {selectedPost.content ? (
+              {/* 섹션 1: 📜 사건의 발단 */}
+              <section className="space-y-3">
                 <div>
-                  <div className="text-xs font-black tracking-widest uppercase text-zinc-500 mb-2">사건 경위 (상세 내용)</div>
-                  <p className="text-base text-zinc-300 leading-relaxed whitespace-pre-wrap rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3">
-                    {selectedPost.content}
+                  <div className="text-xs font-black tracking-widest uppercase text-zinc-400">
+                    📜 사건의 발단
+                  </div>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    원고가 직접 작성한 사건의 경위입니다.
                   </p>
                 </div>
-              ) : null}
-              
-              {/* AI 판결 기준 유무죄 % - 무죄주장(DEFENSE)이면 무죄 먼저 */}
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 w-full overflow-x-hidden min-w-0">
+                  {selectedPost.content ? (
+                    <p className="text-sm sm:text-base text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
+                      {selectedPost.content}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-zinc-500">
+                      작성된 사건 경위가 없습니다.
+                    </p>
+                  )}
+                </div>
+              </section>
+
+              <div className="my-6 border-t border-dashed border-zinc-700" />
+
+              {/* 섹션 2: ⚖️ AI 대법관 선고 */}
               {(() => {
                 const isFinished = !isVotingOpen(selectedPost.created_at, selectedPost.voting_ended_at);
                 const aiRatio = selectedPost.ratio ?? 50;
@@ -1078,73 +1204,124 @@ export default function OngoingTrialsPage() {
                   (verdictText.includes("원고 무죄") && selectedPost.trial_type !== "ACCUSATION");
                 const notGuiltyPct = isDefense ? aiRatio : 100 - aiRatio;
                 const guiltyPct = isDefense ? 100 - aiRatio : aiRatio;
-
-                if (isFinished) {
-                  return (
-                    <div className="text-xs text-zinc-600 text-center mb-4">
-                      AI 판결: {isDefense ? `무죄 ${notGuiltyPct}% · 유죄 ${guiltyPct}%` : `유죄 ${guiltyPct}% · 무죄 ${notGuiltyPct}%`}
-                    </div>
-                  );
-                }
-
+                const isFiftyFifty = guiltyPct === 50 && notGuiltyPct === 50;
+                const primaryLabel = guiltyPct >= notGuiltyPct ? "유죄" : "무죄";
+                const primaryPct = guiltyPct >= notGuiltyPct ? guiltyPct : notGuiltyPct;
+                const neutralReason =
+                  "본 사건은 원고와 피고의 주장이 법리적으로 팽팽히 맞서고 있어, 현재의 알고리즘으로는 확정적 판결을 내릴 수 없는 '법리적 난제'입니다.";
                 return (
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-4 mb-4">
-                    <div className="text-xs font-black tracking-widest uppercase text-zinc-400 mb-3">AI 판결</div>
-                    <div className="flex items-center justify-center gap-4 md:gap-6">
-                      {isDefense ? (
-                        <>
-                          <div className="text-center">
-                            <div className="text-xl md:text-2xl font-black text-blue-400 mb-1">
-                              무죄 {notGuiltyPct}%
-                            </div>
-                            <div className="text-xs text-zinc-500">원고 유리</div>
-                          </div>
-                          <div className="text-zinc-600 text-lg md:text-xl">vs</div>
-                          <div className="text-center">
-                            <div className="text-xl md:text-2xl font-black text-red-400 mb-1">
-                              유죄 {guiltyPct}%
-                            </div>
-                            <div className="text-xs text-zinc-500">피고 과실</div>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="text-center">
-                            <div className="text-xl md:text-2xl font-black text-red-400 mb-1">
-                              유죄 {guiltyPct}%
-                            </div>
-                            <div className="text-xs text-zinc-500">피고 과실</div>
-                          </div>
-                          <div className="text-zinc-600 text-lg md:text-xl">vs</div>
-                          <div className="text-center">
-                            <div className="text-xl md:text-2xl font-black text-blue-400 mb-1">
-                              무죄 {notGuiltyPct}%
-                            </div>
-                            <div className="text-xs text-zinc-500">원고 과실</div>
-                          </div>
-                        </>
-                      )}
+                  <section className="space-y-4">
+                    <div>
+                      <div className="text-xs font-black tracking-widest uppercase text-zinc-400">
+                        ⚖️ AI 대법관 선고
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        이 사건에 대한 AI 대법관의 최종 판단과 그 근거입니다.
+                      </p>
                     </div>
-                  </div>
+                    <div className="relative overflow-hidden rounded-2xl border border-amber-400/40 bg-gradient-to-br from-amber-500/15 via-zinc-900 to-zinc-950 px-3 py-4 md:px-5 md:py-5 shadow-[0_0_35px_rgba(245,158,11,0.25)] w-full">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs sm:text-base font-semibold text-amber-100 min-w-0 truncate">
+                          {isFinished ? "AI 최종 판결" : "AI 현재 예측"}
+                        </span>
+                        <span className="inline-flex shrink-0 items-center rounded-full border border-amber-400/80 bg-amber-500/15 px-2.5 py-0.5 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-amber-200 shadow-[0_0_18px_rgba(245,158,11,0.7)]">
+                          AI JUDGMENT
+                        </span>
+                      </div>
+                      <div className="mt-3 md:mt-4 text-center space-y-1 md:space-y-2">
+                        {isFiftyFifty ? (
+                          <>
+                            <p className="text-lg sm:text-2xl md:text-3xl font-black text-amber-400 whitespace-nowrap">
+                              [ ⚖️ 판결 유보 : 판단 불가 ]
+                            </p>
+                            <p className="text-[11px] sm:text-xs text-amber-400/90 whitespace-nowrap tabular-nums">
+                              유죄 50% · 무죄 50%
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p
+                              className={`text-lg sm:text-2xl md:text-3xl font-black whitespace-nowrap ${
+                                primaryLabel === "유죄" ? "text-red-300" : "text-blue-300"
+                              }`}
+                            >
+                              {primaryLabel} <span className="tabular-nums">{primaryPct}%</span>
+                            </p>
+                            <p className="text-[11px] sm:text-xs text-zinc-300 whitespace-nowrap">
+                              유죄 {guiltyPct}% · 무죄 {notGuiltyPct}%
+                            </p>
+                          </>
+                        )}
+                      </div>
+                      <div className="mt-3 md:mt-4 relative h-2 rounded-full bg-zinc-800 overflow-visible flex w-full">
+                        <div
+                          className={`h-full rounded-l-full ${
+                            isFiftyFifty ? "bg-red-500/80" : primaryLabel === "유죄" ? "bg-red-500/80" : "bg-blue-500/80"
+                          }`}
+                          style={{
+                            width: `${isFiftyFifty ? 50 : primaryLabel === "유죄" ? guiltyPct : notGuiltyPct}%`,
+                          }}
+                        />
+                        {isFiftyFifty ? (
+                          <span
+                            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex h-5 w-5 items-center justify-center rounded-full border-2 border-amber-400/90 bg-zinc-900 text-[10px] font-black text-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.5)]"
+                            aria-hidden
+                          >
+                            ⚡
+                          </span>
+                        ) : null}
+                        <div
+                          className={`h-full rounded-r-full ${
+                            isFiftyFifty ? "bg-blue-500/80" : primaryLabel === "유죄" ? "bg-blue-500/50" : "bg-red-500/50"
+                          }`}
+                          style={{
+                            width: `${isFiftyFifty ? 50 : primaryLabel === "유죄" ? notGuiltyPct : guiltyPct}%`,
+                          }}
+                        />
+                      </div>
+                      {/* AI 상세 판결 */}
+                      {(() => {
+                        const raw =
+                          selectedPost.verdict_rationale ??
+                          (selectedPost as Record<string, unknown>).verdictRationale ??
+                          "";
+                        const rationale = typeof raw === "string" ? raw : "";
+                        const displayText =
+                          rationale.trim() || "상세 판결 근거가 기록되지 않은 사건입니다.";
+                        return (
+                          <div className="mt-3 md:mt-4">
+                            <div className="text-[11px] sm:text-xs font-semibold text-amber-100/90 mb-1">
+                              AI 상세 판결
+                            </div>
+                            <p className="text-xs sm:text-base text-amber-50 leading-relaxed whitespace-pre-wrap break-words">
+                              {displayText}
+                            </p>
+                          </div>
+                        );
+                      })()}
+                      <div className="mt-3 md:mt-4 text-[11px] sm:text-xs font-semibold text-amber-100/90">
+                        AI 최종 판결
+                      </div>
+                      <p className="mt-1 text-xs sm:text-base text-amber-50 leading-relaxed whitespace-pre-wrap break-keep">
+                        {isFiftyFifty ? neutralReason : verdictText || "AI 판결 이유가 아직 준비되지 않았습니다."}
+                      </p>
+                    </div>
+                  </section>
                 );
               })()}
-              
-              {/* 최종 판결 - 판결 완료 시에만 표시 */}
-              {!isVotingOpen(selectedPost.created_at, selectedPost.voting_ended_at) ? (
-                <div className="rounded-2xl border-2 border-amber-500/40 bg-amber-500/15 px-5 py-5 shadow-[0_0_24px_rgba(245,158,11,0.12)]">
-                  <div className="text-xs font-black tracking-widest uppercase text-amber-300 mb-3">최종 판결</div>
-                  <p className="text-lg md:text-xl font-bold text-amber-50 leading-relaxed whitespace-pre-wrap">
-                    {selectedPost.verdict}
-                  </p>
+
+              <div className="my-6 border-t border-dashed border-zinc-700" />
+
+              {/* 섹션 3: 👥 배심원 평결 및 한마디 */}
+              <div className="mb-4">
+                <div className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                  <span>👥 배심원 평결 및 한마디</span>
                 </div>
-              ) : (
-                <div className="rounded-2xl border-2 border-amber-500/40 bg-amber-500/15 px-5 py-5 shadow-[0_0_24px_rgba(245,158,11,0.12)]">
-                  <div className="text-xs font-black tracking-widest uppercase text-amber-300 mb-3">AI 판결</div>
-                  <p className="text-lg md:text-xl font-bold text-amber-50 leading-relaxed whitespace-pre-wrap">
-                    {selectedPost.verdict}
-                  </p>
-                </div>
-              )}
+                <p className="mt-1 text-xs text-zinc-500">
+                  AI의 판결에 대해 배심원들이 어떻게 생각하는지 한눈에 볼 수 있습니다.
+                </p>
+              </div>
+
               {/* 상세 모달 내 투표 - 무죄주장이면 무죄 버튼 먼저 */}
               {isVotingOpen(selectedPost.created_at, selectedPost.voting_ended_at) ? (
                 <div className="flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
@@ -1601,6 +1778,55 @@ export default function OngoingTrialsPage() {
                   </>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* 판결문 삭제 비밀번호 모달 */}
+      {deletePostId ? (
+        <div className="fixed inset-0 z-[190] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-zinc-950 border border-zinc-800 p-5 space-y-4">
+            <h4 className="text-sm font-black text-zinc-100">판결문 삭제</h4>
+            <p className="text-xs text-zinc-400">
+              기소 시 설정한 판결문 수정 및 삭제 비밀번호를 입력하세요.
+            </p>
+            <input
+              ref={deletePasswordRef}
+              type="password"
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (deletePassword.trim()) handleDeletePost(deletePostId, deletePassword);
+                }
+                if (e.key === "Escape") closeDeleteModal();
+              }}
+              placeholder="판결문 수정 및 삭제 비밀번호"
+              maxLength={20}
+              autoComplete="current-password"
+              disabled={deleteSubmitting}
+              className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 outline-none disabled:opacity-60"
+            />
+            <p className="text-[11px] text-zinc-500">*작성 후 수정 및 삭제를 위해 반드시 기억해주세요.</p>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={deleteSubmitting}
+                className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-bold text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeletePost(deletePostId, deletePassword)}
+                disabled={!deletePassword.trim() || deleteSubmitting}
+                className="rounded-xl bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deleteSubmitting ? "삭제 중..." : "삭제"}
+              </button>
             </div>
           </div>
         </div>
