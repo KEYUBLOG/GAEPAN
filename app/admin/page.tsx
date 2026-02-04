@@ -361,18 +361,16 @@ export default function AdminPage() {
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 p-4">
           <div className="relative w-full max-w-[400px] flex flex-col items-center">
             {/* 모바일 프레임 */}
-            <div className="relative w-[375px] h-[812px] bg-zinc-900 rounded-[3rem] p-2 shadow-2xl border-8 border-zinc-800 overflow-hidden">
+            <div className="relative w-full max-w-[375px] aspect-[375/812] bg-zinc-900 rounded-[3rem] p-2 shadow-2xl border-8 border-zinc-800 overflow-hidden">
               {/* 상단 노치 시뮬레이션 */}
               <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[150px] h-[30px] bg-black rounded-b-3xl z-10 pointer-events-none"></div>
               
               {/* iframe */}
               <div className="w-full h-full rounded-[2.5rem] border-0 bg-white overflow-hidden">
                 <iframe
-                  src="/?mobile_preview=true"
+                  src="/"
                   className="w-full h-full border-0"
                   style={{
-                    width: "375px",
-                    height: "100%",
                     pointerEvents: "auto",
                   }}
                   title="모바일 미리보기"

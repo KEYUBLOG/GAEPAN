@@ -521,7 +521,7 @@ export default function OngoingTrialsPage() {
       return;
     }
     if (!form.password?.trim()) {
-      setJudgeError("삭제 비밀번호를 입력해 주세요.");
+      setJudgeError("판결문 수정 및 삭제 비밀번호를 입력해 주세요.");
       return;
     }
 
@@ -590,30 +590,24 @@ export default function OngoingTrialsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen bg-black overflow-x-hidden">
       {/* 네비게이션 */}
-      <nav className="p-6 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50">
-        <Link href="/" className="text-2xl font-black tracking-tighter text-amber-500 italic">
+      <nav className="px-4 py-3 md:px-6 md:py-4 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50">
+        <Link href="/" className="text-2xl font-black tracking-tighter text-amber-500 italic max-w-[40%] truncate">
           GAEPAN
         </Link>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center">
           <button
             type="button"
             onClick={openAccuse}
-            className="bg-amber-600 hover:bg-amber-500 text-black px-4 py-2 rounded-full text-sm font-bold transition"
+            className="bg-amber-600 hover:bg-amber-500 text-black px-3 py-1.5 md:px-4 md:py-2 rounded-full text-sm font-bold transition"
           >
             지금 기소하기
           </button>
-          <Link
-            href="/"
-            className="text-sm font-bold text-zinc-400 hover:text-amber-500 transition"
-          >
-            메인으로
-          </Link>
         </div>
       </nav>
 
-      <div className="max-w-5xl mx-auto py-12 px-6">
+      <div className="max-w-5xl mx-auto py-12 px-4 md:px-6">
         <div className="mb-8">
           <h1 className="text-4xl font-black text-amber-400 mb-2">진행 중인 재판</h1>
           <p className="text-amber-400/90 text-sm font-semibold">
@@ -693,7 +687,7 @@ export default function OngoingTrialsPage() {
             진행 중인 재판이 없습니다.
           </div>
         ) : (
-          <div className="grid md:grid-cols-2 gap-6">
+          <div className="grid md:grid-cols-2 gap-4 md:gap-6">
             {filteredPosts.map((p) => (
               <article
                 key={p.id}
@@ -701,7 +695,7 @@ export default function OngoingTrialsPage() {
                 tabIndex={0}
                 onClick={() => setSelectedPost(p)}
                 onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
-                className="group rounded-[1.75rem] border border-zinc-900 bg-zinc-950 p-5 hover:border-amber-500/40 transition-all cursor-pointer select-none flex flex-col relative"
+                className="group w-full mx-4 md:mx-0 rounded-[1.75rem] border border-zinc-900 bg-zinc-950 p-4 md:p-6 hover:border-amber-500/40 transition-all cursor-pointer select-none flex flex-col relative"
               >
                 {/* 카테고리 */}
                 {p.category ? (
@@ -724,11 +718,11 @@ export default function OngoingTrialsPage() {
                 {/* 제목 */}
                 <div className="pt-6 mb-4">
                   {isUrgent(p.created_at) ? (
-                    <span className="text-[11px] font-bold text-red-500 block mb-1 text-center">
+                    <span className="text-[10px] md:text-[11px] font-bold text-red-500 block mb-1 text-center">
                       [🔥 판결 임박]
                     </span>
                   ) : null}
-                  <h4 className="text-lg md:text-xl font-bold group-hover:text-amber-400 transition line-clamp-2 text-center mb-3">
+                  <h4 className="text-lg md:text-2xl font-bold group-hover:text-amber-400 transition line-clamp-2 text-center mb-3 break-words">
                     {p.title}
                   </h4>
 
@@ -746,14 +740,14 @@ export default function OngoingTrialsPage() {
                         {isDefense ? (
                           <>
                             <div className="text-center">
-                              <div className="text-xl md:text-2xl font-black text-blue-400">
+                              <div className="text-lg md:text-2xl font-black text-blue-400">
                                 무죄 {notGuiltyPct}%
                               </div>
                               <div className="text-[10px] text-zinc-500">AI 판결</div>
                             </div>
-                            <div className="text-zinc-600 text-lg">vs</div>
+                            <div className="text-zinc-600 text-base md:text-lg">vs</div>
                             <div className="text-center">
-                              <div className="text-xl md:text-2xl font-black text-red-400">
+                              <div className="text-lg md:text-2xl font-black text-red-400">
                                 유죄 {guiltyPct}%
                               </div>
                               <div className="text-[10px] text-zinc-500">AI 판결</div>
@@ -762,14 +756,14 @@ export default function OngoingTrialsPage() {
                         ) : (
                           <>
                             <div className="text-center">
-                              <div className="text-xl md:text-2xl font-black text-red-400">
+                              <div className="text-lg md:text-2xl font-black text-red-400">
                                 유죄 {guiltyPct}%
                               </div>
                               <div className="text-[10px] text-zinc-500">AI 판결</div>
                             </div>
-                            <div className="text-zinc-600 text-lg">vs</div>
+                            <div className="text-zinc-600 text-base md:text-lg">vs</div>
                             <div className="text-center">
-                              <div className="text-xl md:text-2xl font-black text-blue-400">
+                              <div className="text-lg md:text-2xl font-black text-blue-400">
                                 무죄 {notGuiltyPct}%
                               </div>
                               <div className="text-[10px] text-zinc-500">AI 판결</div>
@@ -822,7 +816,7 @@ export default function OngoingTrialsPage() {
                               : (userVotes[p.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
                           }`}
                         >
-                          {first === "not_guilty" ? "무죄" : "유죄"} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? p.not_guilty : p.guilty}표
+                          {first === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? p.not_guilty : p.guilty}표
                         </button>
                         <button
                           type="button"
@@ -834,7 +828,7 @@ export default function OngoingTrialsPage() {
                               : (userVotes[p.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
                           }`}
                         >
-                          {second === "not_guilty" ? "무죄" : "유죄"} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? p.not_guilty : p.guilty}표
+                          {second === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? p.not_guilty : p.guilty}표
                         </button>
                       </>
                     );
@@ -1096,18 +1090,18 @@ export default function OngoingTrialsPage() {
                 return (
                   <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-4 mb-4">
                     <div className="text-xs font-black tracking-widest uppercase text-zinc-400 mb-3">AI 판결</div>
-                    <div className="flex items-center justify-center gap-6">
+                    <div className="flex items-center justify-center gap-4 md:gap-6">
                       {isDefense ? (
                         <>
                           <div className="text-center">
-                            <div className="text-2xl md:text-3xl font-black text-blue-400 mb-1">
+                            <div className="text-xl md:text-2xl font-black text-blue-400 mb-1">
                               무죄 {notGuiltyPct}%
                             </div>
                             <div className="text-xs text-zinc-500">원고 유리</div>
                           </div>
-                          <div className="text-zinc-600 text-xl">vs</div>
+                          <div className="text-zinc-600 text-lg md:text-xl">vs</div>
                           <div className="text-center">
-                            <div className="text-2xl md:text-3xl font-black text-red-400 mb-1">
+                            <div className="text-xl md:text-2xl font-black text-red-400 mb-1">
                               유죄 {guiltyPct}%
                             </div>
                             <div className="text-xs text-zinc-500">피고 과실</div>
@@ -1116,14 +1110,14 @@ export default function OngoingTrialsPage() {
                       ) : (
                         <>
                           <div className="text-center">
-                            <div className="text-2xl md:text-3xl font-black text-red-400 mb-1">
+                            <div className="text-xl md:text-2xl font-black text-red-400 mb-1">
                               유죄 {guiltyPct}%
                             </div>
                             <div className="text-xs text-zinc-500">피고 과실</div>
                           </div>
-                          <div className="text-zinc-600 text-xl">vs</div>
+                          <div className="text-zinc-600 text-lg md:text-xl">vs</div>
                           <div className="text-center">
-                            <div className="text-2xl md:text-3xl font-black text-blue-400 mb-1">
+                            <div className="text-xl md:text-2xl font-black text-blue-400 mb-1">
                               무죄 {notGuiltyPct}%
                             </div>
                             <div className="text-xs text-zinc-500">원고 과실</div>
@@ -1170,25 +1164,25 @@ export default function OngoingTrialsPage() {
                           type="button"
                           disabled={votingId === selectedPost.id}
                           onClick={() => handleVote(selectedPost.id, first)}
-                          className={`rounded-lg px-4 py-1.5 text-xs font-bold transition disabled:opacity-50 shadow-sm ${
+                          className={`rounded-lg px-4 py-2 text-xs font-bold transition disabled:opacity-50 shadow-sm ${
                             first === "not_guilty"
                               ? (userVotes[selectedPost.id] === "not_guilty" ? "bg-blue-500/50 ring-1 ring-blue-400/60 text-blue-100" : "bg-blue-500/20 hover:bg-blue-500/30 text-blue-400")
                               : (userVotes[selectedPost.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
                           }`}
                         >
-                          {first === "not_guilty" ? "무죄" : "유죄"} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
+                          {first === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
                         </button>
                         <button
                           type="button"
                           disabled={votingId === selectedPost.id}
                           onClick={() => handleVote(selectedPost.id, second)}
-                          className={`rounded-lg px-4 py-1.5 text-xs font-bold transition disabled:opacity-50 shadow-sm ${
+                          className={`rounded-lg px-4 py-2 text-xs font-bold transition disabled:opacity-50 shadow-sm ${
                             second === "not_guilty"
                               ? (userVotes[selectedPost.id] === "not_guilty" ? "bg-blue-500/50 ring-1 ring-blue-400/60 text-blue-100" : "bg-blue-500/20 hover:bg-blue-500/30 text-blue-400")
                               : (userVotes[selectedPost.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
                           }`}
                         >
-                          {second === "not_guilty" ? "무죄" : "유죄"} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
+                          {second === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
                         </button>
                       </>
                     );
@@ -1290,7 +1284,7 @@ export default function OngoingTrialsPage() {
                     value={commentFormPassword}
                     onChange={(e) => setCommentFormPassword(e.target.value)}
                     disabled={commentSubmitting}
-                    placeholder="삭제 비밀번호 (삭제 시 필요, 20자 이내)"
+                    placeholder="판결문 수정 및 삭제 비밀번호 (20자 이내)"
                     maxLength={20}
                     className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-amber-500/60"
                   />
@@ -1913,19 +1907,20 @@ export default function OngoingTrialsPage() {
 
                 <div>
                   <label className="block text-xs font-black tracking-widest uppercase text-zinc-400">
-                    판결문 삭제 비밀번호
+                    판결문 수정 및 삭제 비밀번호
                   </label>
-                  <p className="mt-1 text-xs text-zinc-500 mb-2">나중에 판결문을 삭제할 때 사용할 비밀번호입니다.</p>
+                  <p className="mt-1 text-xs text-zinc-500 mb-2">나중에 판결문을 수정·삭제할 때 사용할 비밀번호입니다.</p>
                   <input
                     type="password"
                     value={form.password}
                     onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
                     disabled={isReviewing}
                     className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 transition"
-                    placeholder="비밀번호 입력"
+                    placeholder="판결문 수정 및 삭제 비밀번호"
                     maxLength={20}
                     required
                   />
+                  <p className="mt-1 text-[11px] text-zinc-500">*작성 후 수정 및 삭제를 위해 반드시 기억해주세요.</p>
                 </div>
               </div>
 

@@ -454,7 +454,7 @@ export default function HallOfFamePage() {
       return;
     }
     if (!form.password?.trim()) {
-      setJudgeError("삭제 비밀번호를 입력해 주세요.");
+      setJudgeError("판결문 수정 및 삭제 비밀번호를 입력해 주세요.");
       return;
     }
 
@@ -523,30 +523,24 @@ export default function HallOfFamePage() {
   };
 
   return (
-    <div className={`min-h-screen bg-black ${notoSerif.className}`}>
+    <div className={`min-h-screen bg-black overflow-x-hidden ${notoSerif.className}`}>
       {/* 네비게이션 */}
-      <nav className="p-6 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50 font-sans">
-        <Link href="/" className="text-2xl font-black tracking-tighter text-amber-500 italic">
+      <nav className="px-4 py-3 md:px-6 md:py-4 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50 font-sans">
+        <Link href="/" className="text-2xl font-black tracking-tighter text-amber-500 italic max-w-[40%] truncate">
           GAEPAN
         </Link>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center">
           <button
             type="button"
             onClick={openAccuse}
-            className="bg-amber-600 hover:bg-amber-500 text-black px-4 py-2 rounded-full text-sm font-bold transition"
+            className="bg-amber-600 hover:bg-amber-500 text-black px-3 py-1.5 md:px-4 md:py-2 rounded-full text-sm font-bold transition"
           >
             지금 기소하기
           </button>
-          <Link
-            href="/"
-            className="text-sm font-bold text-zinc-400 hover:text-amber-500 transition"
-          >
-            메인으로
-          </Link>
         </div>
       </nav>
 
-      <div className="max-w-5xl mx-auto py-12 px-6">
+      <div className="max-w-5xl mx-auto py-12 px-4 md:px-6">
         <div className="mb-10">
           <h1 className="text-4xl md:text-5xl font-bold text-amber-400 mb-2 tracking-tight">
             명예의 전당
@@ -971,7 +965,7 @@ export default function HallOfFamePage() {
                     value={commentFormPassword}
                     onChange={(e) => setCommentFormPassword(e.target.value)}
                     disabled={commentSubmitting}
-                    placeholder="삭제 비밀번호 (삭제 시 필요, 20자 이내)"
+                    placeholder="판결문 수정 및 삭제 비밀번호 (20자 이내)"
                     maxLength={20}
                     className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-amber-500/60"
                   />
@@ -1593,19 +1587,20 @@ export default function HallOfFamePage() {
 
                 <div>
                   <label className="block text-xs font-black tracking-widest uppercase text-zinc-400">
-                    판결문 삭제 비밀번호
+                    판결문 수정 및 삭제 비밀번호
                   </label>
-                  <p className="mt-1 text-xs text-zinc-500 mb-2">나중에 판결문을 삭제할 때 사용할 비밀번호입니다.</p>
+                  <p className="mt-1 text-xs text-zinc-500 mb-2">나중에 판결문을 수정·삭제할 때 사용할 비밀번호입니다.</p>
                   <input
                     type="password"
                     value={form.password}
                     onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
                     disabled={isReviewing}
                     className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 transition"
-                    placeholder="비밀번호 입력"
+                    placeholder="판결문 수정 및 삭제 비밀번호"
                     maxLength={20}
                     required
                   />
+                  <p className="mt-1 text-[11px] text-zinc-500">*작성 후 수정 및 삭제를 위해 반드시 기억해주세요.</p>
                 </div>
               </div>
 

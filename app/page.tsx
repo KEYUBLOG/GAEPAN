@@ -3,6 +3,7 @@
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { animate } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 const TRIAL_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -92,6 +93,44 @@ function generateCourtNickname(postId: string, voterId: string): string {
   return `${adjectives[adjIndex]} ${titles[titleIndex]}`;
 }
 
+function isAuthorVictoryFromPost(p: {
+  trial_type: "DEFENSE" | "ACCUSATION" | null;
+  guilty: number;
+  not_guilty: number;
+  ratio: number | null;
+}): boolean {
+  const aiRatio = p.ratio ?? 50;
+  if (p.trial_type === "DEFENSE") {
+    return p.not_guilty > p.guilty;
+  }
+  if (p.trial_type === "ACCUSATION") {
+    return p.guilty > p.not_guilty;
+  }
+  return aiRatio >= 50;
+}
+
+function AnimatedNumber({ value }: { value: number }) {
+  const [display, setDisplay] = useState(value);
+  const previousRef = useRef(value);
+
+  useEffect(() => {
+    const from = previousRef.current;
+    const to = value;
+    if (from === to) return;
+    const controls = animate(from, to, {
+      duration: 0.6,
+      ease: "easeOut",
+      onUpdate: (v) => setDisplay(Math.round(v)),
+    });
+    previousRef.current = to;
+    return () => {
+      controls.stop();
+    };
+  }, [value]);
+
+  return <span className="tabular-nums">{display.toLocaleString("ko-KR")}</span>;
+}
+
 /** DB ratio 값(피고 과실 0~100)을 number | null로 정규화 */
 function toRatioNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -116,26 +155,6 @@ function toRatioNumber(value: unknown): number | null {
   };
 
 function HomeContent() {
-  const [isMobilePreview, setIsMobilePreview] = useState(false);
-  
-  useEffect(() => {
-    // URL 쿼리 파라미터 확인
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("mobile_preview") === "true") {
-      setIsMobilePreview(true);
-      // 모바일 뷰포트 메타 태그 강제 설정
-      const viewport = document.querySelector('meta[name="viewport"]');
-      if (viewport) {
-        viewport.setAttribute("content", "width=375, initial-scale=1.0, maximum-scale=1.0, user-scalable=no");
-      } else {
-        const meta = document.createElement("meta");
-        meta.name = "viewport";
-        meta.content = "width=375, initial-scale=1.0, maximum-scale=1.0, user-scalable=no";
-        document.head.appendChild(meta);
-      }
-    }
-  }, []);
-
   const [isAccuseOpen, setIsAccuseOpen] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
   const [judgeResult, setJudgeResult] = useState<{
@@ -228,6 +247,7 @@ function HomeContent() {
   const [commentDeleteTargetId, setCommentDeleteTargetId] = useState<string | null>(null);
   const [commentDeletePassword, setCommentDeletePassword] = useState("");
   const [commentDeleteSubmitting, setCommentDeleteSubmitting] = useState(false);
+  const [juryBarAnimated, setJuryBarAnimated] = useState(false);
   const [commentDeleteError, setCommentDeleteError] = useState<string | null>(null);
 
   const [reportTarget, setReportTarget] = useState<{
@@ -246,6 +266,12 @@ function HomeContent() {
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [deleteToast, setDeleteToast] = useState<{ message: string; isError?: boolean } | null>(null);
+  const [editPostId, setEditPostId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [editPassword, setEditPassword] = useState("");
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const [trialTab, setTrialTab] = useState<"ongoing" | "completed">("ongoing");
   const [ongoingSort, setOngoingSort] = useState<"latest" | "votes" | "urgent">("urgent");
   const [liveFeedItems, setLiveFeedItems] = useState<Array<{
@@ -273,6 +299,13 @@ function HomeContent() {
   const [isMobileLogOpen, setIsMobileLogOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  const [todayStats, setTodayStats] = useState<{
+    total: number;
+    wins: number;
+    losses: number;
+  } | null>(null);
+  const [todayStatsError, setTodayStatsError] = useState<string | null>(null);
+
   const firstFieldRef = useRef<HTMLInputElement | null>(null);
   const postsListRef = useRef<HTMLElement | null>(null);
   const hallOfFameRef = useRef<HTMLElement | null>(null);
@@ -292,6 +325,66 @@ function HomeContent() {
       document.removeEventListener("selectstart", prevent);
       document.removeEventListener("dragstart", prevent);
     };
+  }, []);
+
+  // 오늘 확정된 재판 집계 (실시간 사법 전광판)
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+
+    const loadTodayStats = async () => {
+      try {
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+
+        const { data, error } = await supabase
+          .from("posts")
+          .select("id, guilty, not_guilty, ratio, trial_type, created_at, voting_ended_at, status")
+          .gte("created_at", start.toISOString())
+          .neq("status", "판결불가");
+
+        if (error) throw error;
+
+        const rows = (data ?? []) as Array<{
+          id: string;
+          guilty: number | null;
+          not_guilty: number | null;
+          ratio: number | null;
+          trial_type: "DEFENSE" | "ACCUSATION" | null;
+          created_at: string | null;
+          voting_ended_at: string | null;
+          status?: string | null;
+        }>;
+
+        const completed = rows.filter((row) =>
+          !isVotingOpen(row.created_at ?? null, row.voting_ended_at ?? null),
+        );
+
+        const total = completed.length;
+        let wins = 0;
+
+        for (const row of completed) {
+          const p = {
+            trial_type: row.trial_type ?? null,
+            guilty: Number(row.guilty) || 0,
+            not_guilty: Number(row.not_guilty) || 0,
+            ratio: typeof row.ratio === "number" ? row.ratio : null,
+          };
+          if (isAuthorVictoryFromPost(p)) wins += 1;
+        }
+
+        const losses = Math.max(0, total - wins);
+        setTodayStats({ total, wins, losses });
+        setTodayStatsError(null);
+      } catch (err) {
+        console.error("[GAEPAN] 오늘 재판 현황 집계 오류:", err);
+        setTodayStatsError("오늘 재판 현황을 불러오지 못했습니다.");
+      }
+    };
+
+    loadTodayStats();
+
+    const interval = setInterval(loadTodayStats, 60_000);
+    return () => clearInterval(interval);
   }, []);
 
   const searchParams = useSearchParams();
@@ -791,7 +884,7 @@ function HomeContent() {
       return;
     }
     if (!form.password?.trim()) {
-      setJudgeError("삭제 비밀번호를 입력해 주세요.");
+      setJudgeError("판결문 수정 및 삭제 비밀번호를 입력해 주세요.");
       return;
     }
 
@@ -996,6 +1089,50 @@ function HomeContent() {
     setPostMenuOpenId(null);
   };
 
+  const closeEditModal = () => {
+    setEditPostId(null);
+    setEditTitle("");
+    setEditContent("");
+    setEditPassword("");
+    setEditError(null);
+    setEditSubmitting(false);
+  };
+
+  const handleEditPost = async (postId: string, payload: { password: string; title: string; content: string }) => {
+    if (!postId?.trim() || !payload.password.trim()) return;
+    setEditSubmitting(true);
+    setEditError(null);
+    try {
+      const r = await fetch(`/api/posts/${postId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          password: payload.password.trim(),
+          title: payload.title.trim(),
+          content: payload.content,
+        }),
+      });
+      const data = (await r.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!r.ok || (data && data.ok === false)) {
+        setEditError(data?.error ?? "수정에 실패했습니다.");
+        setEditSubmitting(false);
+        return;
+      }
+      const { title, content } = { title: payload.title.trim(), content: payload.content };
+      setSelectedPost((prev) => (prev?.id === postId ? { ...prev, title, content } : prev));
+      setRecentPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, title, content } : p)));
+      setTopGuiltyPost((prev) => (prev?.id === postId ? { ...prev, title, content } : prev));
+      closeEditModal();
+      setPostMenuOpenId(null);
+      setDeleteToast({ message: "판결문이 수정되었습니다." });
+      setTimeout(() => setDeleteToast(null), 4000);
+    } catch (err) {
+      console.error("[handleEditPost]", err);
+      setEditError("수정 요청 중 오류가 발생했습니다.");
+      setEditSubmitting(false);
+    }
+  };
+
   const handleDeletePost = async (postId: string, password: string) => {
     if (typeof window === "undefined") return;
     if (!postId?.trim()) {
@@ -1005,7 +1142,7 @@ function HomeContent() {
     }
     const trimmed = password.trim();
     if (!trimmed) {
-      setDeleteToast({ message: "비밀번호를 입력해 주세요.", isError: true });
+      setDeleteToast({ message: "판결문 수정 및 삭제 비밀번호를 입력해 주세요.", isError: true });
       setTimeout(() => setDeleteToast(null), 4000);
       return;
     }
@@ -1200,6 +1337,19 @@ function HomeContent() {
     return () => clearTimeout(t);
   }, [commentDeleteTargetId]);
 
+  // 배심원 평결 그래프 애니메이션 (모달 열릴 때 0% -> 실제 비율)
+  useEffect(() => {
+    if (!selectedPost) {
+      setJuryBarAnimated(false);
+      return;
+    }
+    setJuryBarAnimated(false);
+    const t = setTimeout(() => {
+      setJuryBarAnimated(true);
+    }, 50);
+    return () => clearTimeout(t);
+  }, [selectedPost?.id]);
+
   return (
     <>
       <style jsx global>{`
@@ -1225,7 +1375,7 @@ function HomeContent() {
           animation: slide-up 0.3s ease-out;
         }
       `}</style>
-      <div className={`min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-amber-500 selection:text-black ${isMobilePreview ? 'max-w-[375px] mx-auto' : ''}`}>
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-amber-500 selection:text-black overflow-x-hidden">
       {/* 삭제 결과 토스트 */}
       {deleteToast ? (
         <div
@@ -1306,13 +1456,14 @@ function HomeContent() {
           </div>
         </div>
       ) : null}
+
       {/* 판결문 삭제 비밀번호 모달 */}
       {deletePostId ? (
         <div className="fixed inset-0 z-[190] flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-zinc-950 border border-zinc-800 p-5 space-y-4">
             <h4 className="text-sm font-black text-zinc-100">판결문 삭제</h4>
             <p className="text-xs text-zinc-400">
-              기소장 작성 시 설정한 삭제 비밀번호를 입력하세요.
+              기소 시 설정한 판결문 수정 및 삭제 비밀번호를 입력하세요.
             </p>
             <input
               ref={deletePasswordRef}
@@ -1326,12 +1477,13 @@ function HomeContent() {
                 }
                 if (e.key === "Escape") closeDeleteModal();
               }}
-              placeholder="삭제 비밀번호"
+              placeholder="판결문 수정 및 삭제 비밀번호"
               maxLength={20}
               autoComplete="current-password"
               disabled={deleteSubmitting}
               className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 outline-none disabled:opacity-60"
             />
+            <p className="text-[11px] text-zinc-500">*작성 후 수정 및 삭제를 위해 반드시 기억해주세요.</p>
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
@@ -1348,6 +1500,75 @@ function HomeContent() {
                 className="rounded-xl bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {deleteSubmitting ? "삭제 중..." : "삭제"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* 판결문 수정 모달 */}
+      {editPostId ? (
+        <div className="fixed inset-0 z-[190] flex items-center justify-center bg-black/70 p-4 overflow-y-auto">
+          <div className="w-full max-w-lg rounded-2xl bg-zinc-950 border border-zinc-800 p-5 space-y-4 my-8">
+            <h4 className="text-sm font-black text-zinc-100">판결문 수정</h4>
+            <p className="text-xs text-zinc-400">
+              제목과 내용을 수정한 뒤, 기소 시 설정한 판결문 수정 및 삭제 비밀번호를 입력하세요.
+            </p>
+            <div>
+              <label className="block text-xs font-bold text-zinc-400 mb-1">제목</label>
+              <input
+                type="text"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                disabled={editSubmitting}
+                maxLength={200}
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-500/60 outline-none disabled:opacity-60"
+                placeholder="제목"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-zinc-400 mb-1">내용 (사건 경위)</label>
+              <textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                disabled={editSubmitting}
+                rows={6}
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-500/60 outline-none disabled:opacity-60 resize-y"
+                placeholder="사건 경위"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-zinc-400 mb-1">판결문 수정 및 삭제 비밀번호</label>
+              <input
+                type="password"
+                value={editPassword}
+                onChange={(e) => setEditPassword(e.target.value)}
+                disabled={editSubmitting}
+                maxLength={20}
+                placeholder="판결문 수정 및 삭제 비밀번호"
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-500/60 outline-none disabled:opacity-60"
+              />
+              <p className="mt-1 text-[11px] text-zinc-500">*작성 후 수정 및 삭제를 위해 반드시 기억해주세요.</p>
+            </div>
+            {editError ? (
+              <p className="text-xs text-red-400">{editError}</p>
+            ) : null}
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={closeEditModal}
+                disabled={editSubmitting}
+                className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-bold text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => handleEditPost(editPostId, { password: editPassword, title: editTitle, content: editContent })}
+                disabled={!editTitle.trim() || !editPassword.trim() || editSubmitting}
+                className="rounded-xl bg-amber-500 px-3 py-1.5 text-xs font-bold text-black hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {editSubmitting ? "수정 중..." : "수정 완료"}
               </button>
             </div>
           </div>
@@ -1399,56 +1620,21 @@ function HomeContent() {
       <nav className="px-4 py-3 md:p-6 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50">
         <h1 className="text-lg md:text-2xl font-black tracking-tighter text-amber-500 italic pr-2">GAEPAN</h1>
         
-        {/* 데스크톱 메뉴 */}
-        <div className="hidden md:flex items-center gap-4 text-sm font-bold text-zinc-400">
-          {isOperatorLoggedIn ? (
-            <div className="flex items-center gap-3">
-              <Link
-                href="/admin"
-                className="border border-amber-500/50 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 px-4 py-2 rounded-full text-sm font-bold transition"
-              >
-                대법관 페이지
-              </Link>
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await fetch("/api/admin/logout", { method: "POST" });
-                    setIsOperatorLoggedIn(false);
-                  } catch (err) {
-                    console.error("로그아웃 실패:", err);
-                  }
-                }}
-                className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-full text-sm font-bold transition"
-              >
-                로그아웃
-              </button>
-            </div>
-          ) : null}
-          <button
-            type="button"
-            onClick={openAccuse}
-            className="bg-amber-600 hover:bg-amber-500 text-black px-4 py-2 rounded-full transition"
-          >
-            기소하기
-          </button>
-        </div>
-
-        {/* 모바일 햄버거 메뉴 버튼 */}
+        {/* 우측 상단 메뉴 버튼 (모바일/PC 공통) */}
         <button
           type="button"
           onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          className="md:hidden text-zinc-400 hover:text-amber-500 transition p-2"
+          className="text-zinc-400 hover:text-amber-500 transition p-2"
           aria-label="메뉴"
         >
           <span className="text-2xl font-bold">≡</span>
         </button>
       </nav>
 
-      {/* 모바일 메뉴 드로어 */}
+      {/* 메뉴 드로어 (모바일/PC 공통) */}
       {isMobileMenuOpen ? (
-        <div className="md:hidden fixed inset-0 z-[100] bg-black/90 backdrop-blur-md">
-          <div className="absolute top-0 right-0 w-[280px] h-full bg-zinc-950 border-l border-zinc-900 shadow-2xl">
+        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md">
+          <div className="absolute top-0 right-0 w-[280px] h-full bg-zinc-950 border-l border-zinc-900 shadow-2xl z-50">
             <div className="p-6 flex flex-col h-full">
               <div className="flex items-center justify-between mb-8">
                 <h2 className="text-xl font-black text-amber-500">메뉴</h2>
@@ -1491,7 +1677,31 @@ function HomeContent() {
                     </button>
                   </>
                 ) : null}
-                
+
+                <Link
+                  href="/trials/ongoing"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 transition text-zinc-200 text-sm font-bold border border-zinc-700"
+                >
+                  <span className="text-xl shrink-0">⚖️</span>
+                  <span>진행 중인 재판</span>
+                </Link>
+                <Link
+                  href="/trials/completed"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 transition text-zinc-200 text-sm font-bold border border-zinc-700"
+                >
+                  <span className="text-xl shrink-0">✅</span>
+                  <span>판결 완료된 사건</span>
+                </Link>
+                <Link
+                  href="/hall-of-fame"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 transition text-zinc-200 text-sm font-bold border border-zinc-700"
+                >
+                  <span className="text-xl shrink-0">🏅</span>
+                  <span>명예의 전당</span>
+                </Link>
                 <button
                   type="button"
                   onClick={() => {
@@ -1509,13 +1719,64 @@ function HomeContent() {
           <button
             type="button"
             onClick={() => setIsMobileMenuOpen(false)}
-            className="absolute inset-0 bg-black/50"
+            className="absolute inset-0 bg-black/50 z-40"
             aria-label="닫기"
           />
         </div>
       ) : null}
 
-
+      {/* 실시간 사법 전광판 */}
+      <div className="max-w-7xl mx-auto px-4 md:px-8 mt-4 md:mt-6 mb-4">
+        <div className="bg-black/40 backdrop-blur-md border border-zinc-800/60 rounded-2xl px-4 py-4 md:px-6 md:py-5 shadow-[0_0_30px_rgba(0,0,0,0.6)]">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-[11px] md:text-xs font-semibold tracking-[0.2em] uppercase text-zinc-400">
+              실시간 사법 전광판
+            </h3>
+            <p className="text-[10px] text-zinc-500">
+              오늘 00:00 이후 확정 판결 기준
+            </p>
+          </div>
+          {todayStatsError ? (
+            <p className="text-[11px] text-red-400">{todayStatsError}</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 md:flex md:flex-row md:divide-x md:divide-zinc-800">
+              <div className="flex flex-col items-center justify-center md:px-4 text-center">
+                <span className="text-[11px] text-zinc-500 mb-1">오늘 확정된 사건</span>
+                <div className="text-xl md:text-2xl font-black">
+                  <AnimatedNumber value={todayStats?.total ?? 0} />
+                </div>
+              </div>
+              <div className="flex flex-col items-center justify-center md:px-4 text-center">
+                <span className="text-[11px] text-zinc-500 mb-1 flex items-center gap-1">
+                  오늘 승소 <span className="text-[10px]">🔥</span>
+                </span>
+                <div className="text-xl md:text-2xl font-black text-amber-400">
+                  <AnimatedNumber value={todayStats?.wins ?? 0} />
+                </div>
+              </div>
+              <div className="flex flex-col items-center justify-center md:px-4 text-center">
+                <span className="text-[11px] text-zinc-500 mb-1">오늘 패소</span>
+                <div className="text-xl md:text-2xl font-black text-zinc-200">
+                  <AnimatedNumber value={todayStats?.losses ?? 0} />
+                </div>
+              </div>
+              <div className="flex flex-col items-center justify-center md:px-4 text-center">
+                <span className="text-[11px] text-zinc-500 mb-1">승소율</span>
+                <div className="text-xl md:text-2xl font-black text-emerald-400">
+                  <AnimatedNumber
+                    value={
+                      todayStats && todayStats.total > 0
+                        ? Math.round((todayStats.wins / todayStats.total) * 100)
+                        : 0
+                    }
+                  />
+                  <span className="text-sm ml-1">%</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Main Grid Container */}
       <div className="max-w-7xl mx-auto px-4 md:px-8">
@@ -1555,20 +1816,24 @@ function HomeContent() {
 
             {/* 진행 중: 금주의 개판 / 완료: 최근 마감된 재판 (클릭 시 상세 모달) */}
             {filteredTopGuiltyPost ? (
-              <section className="pt-6 md:pt-12 pb-8 md:pb-16">
+              <section className="pt-6 md:pt-12 pb-8 md:pb-16 space-y-4">
+                <h3 className="text-2xl md:text-3xl font-bold text-left flex items-center gap-2">
+                  <span>🔥</span>
+                  <span>금주의 개판</span>
+                </h3>
           <div
             role="button"
             tabIndex={0}
             onClick={() => setSelectedPost(filteredTopGuiltyPost)}
             onKeyDown={(e) => e.key === "Enter" && setSelectedPost(filteredTopGuiltyPost)}
-            className="rounded-[2rem] border-2 border-amber-500/50 bg-transparent p-8 md:p-10 cursor-pointer select-none transition-transform duration-200 hover:scale-[1.02] hover:border-amber-500/60 active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 relative overflow-hidden"
+            className="w-full rounded-[2rem] border-2 border-amber-500/50 bg-transparent p-4 md:p-10 cursor-pointer select-none transition-transform duration-200 hover:scale-[1.02] hover:border-amber-500/60 active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 relative overflow-hidden"
           >
             {/* LIVE 배지: 모바일은 상단 한 줄로, PC는 우측 상단 고정 */}
             {trialTab === "ongoing" && isVotingOpen(filteredTopGuiltyPost.created_at, filteredTopGuiltyPost.voting_ended_at) ? (
               <>
                 {/* 모바일: LIVE 상단 중앙, ⋯ 우측 최상단만 */}
                 <div className="flex md:hidden relative items-center justify-center mb-4 pt-1">
-                  <div className="flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-full bg-zinc-900/90 border border-amber-500/30 text-amber-400 font-bold text-xs shadow-lg">
+                  <div className="flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-full bg-zinc-900/90 border border-amber-500/30 text-amber-400 font-bold text-[10px] md:text-xs shadow-lg">
                     <span className="relative flex h-2 w-2 shrink-0">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500 animate-pulse"></span>
@@ -1717,16 +1982,17 @@ function HomeContent() {
               </>
             ) : null}
 
-            {/* 상단 지표 */}
-            <div className="flex items-center justify-between mb-6">
-              {/* 좌측: [🔥 금주의 개판] 배지 및 카테고리 — 모바일에서 중앙 정렬 */}
-              <div className="flex items-center justify-center md:justify-start gap-2 overflow-x-auto pb-2 md:pb-0 flex-1 min-w-0">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-amber-500/20 border border-amber-500/50 text-amber-400 shrink-0">
-                  🔥 금주의 개판
-                </span>
+            {/* 상단 메타: 카테고리 + 사건 번호 + 메뉴 */}
+            <div className="flex items-start justify-between mb-4 text-[11px] text-zinc-500">
+              <div className="flex items-center gap-2">
                 {filteredTopGuiltyPost.category ? (
-                  <span className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-zinc-900/80 border border-zinc-800 text-zinc-400 shrink-0">
+                  <span className="inline-block px-3 py-1 rounded-full text-[10px] font-bold bg-zinc-900/80 border border-zinc-800 text-zinc-400 shrink-0">
                     {filteredTopGuiltyPost.category}
+                  </span>
+                ) : null}
+                {filteredTopGuiltyPost.case_number != null ? (
+                  <span className="text-[10px] font-semibold text-amber-400">
+                    사건 번호 {filteredTopGuiltyPost.case_number}
                   </span>
                 ) : null}
               </div>
@@ -1797,37 +2063,45 @@ function HomeContent() {
               </div>
             </div>
 
-            {/* 제목 */}
-            <div className="mb-6">
-              <h3 className="text-xl md:text-3xl font-bold text-amber-50 mb-4 leading-tight text-center md:text-left">
-                "{filteredTopGuiltyPost.title}"
+            {/* 제목 + 내용 요약 */}
+            <div className="mb-4 text-center">
+              {trialTab === "ongoing" && isUrgent(filteredTopGuiltyPost.created_at) ? (
+                <span className="text-[11px] font-bold text-red-500 block mb-1">[🔥 판결 임박]</span>
+              ) : null}
+              <h3 className="text-lg md:text-2xl font-bold text-amber-50 mb-1 leading-tight truncate break-words">
+                {filteredTopGuiltyPost.title}
               </h3>
-              
-              {/* 투표 현황 게이지 (유죄/무죄 비율) */}
-              {(() => {
-                const total = filteredTopGuiltyPost.guilty + filteredTopGuiltyPost.not_guilty;
-                const guiltyPct = total ? Math.round((filteredTopGuiltyPost.guilty / total) * 100) : 0;
-                const notGuiltyPct = total ? Math.round((filteredTopGuiltyPost.not_guilty / total) * 100) : 0;
-                return (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs text-zinc-400">
-                      <span className="text-red-400">유죄 {guiltyPct}% ({filteredTopGuiltyPost.guilty}표)</span>
-                      <span className="text-blue-400">무죄 {notGuiltyPct}% ({filteredTopGuiltyPost.not_guilty}표)</span>
-                    </div>
-                    <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden flex">
-                      <div
-                        className="bg-red-500 h-full transition-all duration-300"
-                        style={{ width: `${guiltyPct}%` }}
-                      />
-                      <div
-                        className="bg-blue-500 h-full transition-all duration-300"
-                        style={{ width: `${notGuiltyPct}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })()}
+              {filteredTopGuiltyPost.content ? (
+                <p className="text-sm text-zinc-400 line-clamp-2 break-words">
+                  {filteredTopGuiltyPost.content}
+                </p>
+              ) : null}
             </div>
+            
+            {/* 투표 현황 게이지 (유죄/무죄 비율) */}
+            {(() => {
+              const total = filteredTopGuiltyPost.guilty + filteredTopGuiltyPost.not_guilty;
+              const guiltyPct = total ? Math.round((filteredTopGuiltyPost.guilty / total) * 100) : 0;
+              const notGuiltyPct = total ? Math.round((filteredTopGuiltyPost.not_guilty / total) * 100) : 0;
+              return (
+                <div className="mb-4 space-y-2">
+                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                    <span className="text-red-400">유죄 {guiltyPct}% ({filteredTopGuiltyPost.guilty}표)</span>
+                    <span className="text-blue-400">무죄 {notGuiltyPct}% ({filteredTopGuiltyPost.not_guilty}표)</span>
+                  </div>
+                  <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden flex">
+                    <div
+                      className="bg-red-500 h-full transition-all duration-300"
+                      style={{ width: `${guiltyPct}%` }}
+                    />
+                    <div
+                      className="bg-blue-500 h-full transition-all duration-300"
+                      style={{ width: `${notGuiltyPct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* 하단 정보 */}
             <div className="flex flex-wrap items-center justify-center gap-2 text-sm text-zinc-400 leading-relaxed">
@@ -2044,19 +2318,20 @@ function HomeContent() {
 
                 <div>
                   <label className="block text-xs font-black tracking-widest uppercase text-zinc-400">
-                    판결문 삭제 비밀번호
+                    판결문 수정 및 삭제 비밀번호
                   </label>
-                  <p className="mt-1 text-xs text-zinc-500 mb-2">나중에 판결문을 삭제할 때 사용할 비밀번호입니다.</p>
+                  <p className="mt-1 text-xs text-zinc-500 mb-2">나중에 판결문을 수정·삭제할 때 사용할 비밀번호입니다.</p>
                   <input
                     type="password"
                     value={form.password}
                     onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
                     disabled={isReviewing}
                     className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 transition"
-                    placeholder="비밀번호 입력"
+                    placeholder="판결문 수정 및 삭제 비밀번호"
                     maxLength={20}
                     required
                   />
+                  <p className="mt-1 text-[11px] text-zinc-500">*작성 후 수정 및 삭제를 위해 반드시 기억해주세요.</p>
                 </div>
               </div>
 
@@ -2204,8 +2479,8 @@ function HomeContent() {
       ) : null}
 
       {/* 진행 중인 재판 섹션 */}
-      <section className="max-w-5xl mx-auto py-12 px-6">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
+      <section className="pt-6 md:pt-12 pb-8 md:pb-16 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div>
             <h3 className="text-2xl md:text-3xl font-black mb-1">진행 중인 재판</h3>
             <p className="text-amber-400/90 text-sm font-semibold">
@@ -2268,7 +2543,7 @@ function HomeContent() {
 
         {ongoingPosts.length > 0 ? (
           <>
-            <div className="grid md:grid-cols-2 gap-6 mt-6">
+            <div className="grid md:grid-cols-2 gap-4 md:gap-6 mt-6 overflow-x-hidden break-all">
               {ongoingPosts.slice(0, 2).map((p) => (
                 <article
                   key={p.id}
@@ -2276,24 +2551,22 @@ function HomeContent() {
                   tabIndex={0}
                   onClick={() => setSelectedPost(p)}
                   onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
-                  className="group rounded-[1.75rem] border border-zinc-900 bg-zinc-950 p-5 hover:border-amber-500/40 transition-all cursor-pointer select-none flex flex-col relative"
+                  className="group w-full max-w-[calc(100vw-2rem)] mx-auto rounded-[1.75rem] border border-zinc-900 bg-zinc-950 p-4 md:p-6 hover:border-amber-500/40 transition-all cursor-pointer select-none flex flex-col gap-2 overflow-x-hidden break-all"
                 >
-                {/* 좌측 상단 카테고리 */}
-                {p.category ? (
-                  <div className="absolute top-3 left-3">
-                    <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-900/80 border border-zinc-800 text-zinc-400">
-                      {p.category}
-                    </span>
+                {/* 상단: 카테고리 + 사건 번호 + 메뉴 */}
+                <div className="flex items-start justify-between mb-2 text-[11px] text-zinc-500">
+                  <div className="flex items-center gap-2">
+                    {p.category ? (
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-900/80 border border-zinc-800 text-zinc-400">
+                        {p.category}
+                      </span>
+                    ) : null}
+                    {p.case_number != null ? (
+                      <span className="hidden md:inline text-[10px] font-semibold text-amber-400">
+                        사건 번호 {p.case_number}
+                      </span>
+                    ) : null}
                   </div>
-                ) : null}
-
-                {/* 우측 상단 사건번호 및 메뉴 */}
-                <div className="absolute top-3 right-3 flex items-center gap-2">
-                  {p.case_number != null ? (
-                    <span className="text-[10px] font-bold text-amber-500/80">
-                      사건 번호 {p.case_number}
-                    </span>
-                  ) : null}
                   <div className="relative">
                     <button
                       type="button"
@@ -2361,46 +2634,23 @@ function HomeContent() {
                   </div>
                 </div>
 
-                {/* 중앙 제목 */}
-                <div className="pt-6 mb-4">
+                {/* 제목 + 내용 요약 */}
+                <div className="mb-2">
                   {isUrgent(p.created_at) ? (
-                    <span className="text-[11px] font-bold text-red-500 block mb-1 text-center">[🔥 판결 임박]</span>
+                    <span className="text-[10px] md:text-[11px] font-bold text-red-500 block mb-1 text-left">[🔥 판결 임박]</span>
                   ) : null}
-                  <h4 className="text-lg md:text-xl font-bold group-hover:text-amber-400 transition line-clamp-2 text-center mb-3">
+                  <h4 className="text-base md:text-lg font-bold group-hover:text-amber-400 transition line-clamp-1 text-left break-all">
                     {p.title}
                   </h4>
-                  
-                  {/* 유무죄 % 비율 (AI 판결 기준) - 무죄주장/원고 무죄면 무죄 앞, 무죄 100% */}
-                  {(() => {
-                    const aiRatio = p.ratio ?? 50;
-                    const verdictText = typeof p.verdict === "string" ? p.verdict : "";
-                    const isDefense =
-                      p.trial_type === "DEFENSE" ||
-                      (verdictText.includes("원고 무죄") && p.trial_type !== "ACCUSATION");
-                    const notGuiltyPct = isDefense ? aiRatio : 100 - aiRatio;
-                    const guiltyPct = isDefense ? 100 - aiRatio : aiRatio;
-                    return (
-                      <div className="flex items-center justify-center gap-3 mb-3">
-                        <div className="text-center">
-                          <div className={`text-xl md:text-2xl font-black ${isDefense ? "text-blue-400" : "text-red-400"}`}>
-                            {isDefense ? "무죄" : "유죄"} {notGuiltyPct}%
-                          </div>
-                          <div className="text-[10px] text-zinc-500">AI 판결</div>
-                        </div>
-                        <div className="text-zinc-600 text-lg">vs</div>
-                        <div className="text-center">
-                          <div className={`text-xl md:text-2xl font-black ${isDefense ? "text-red-400" : "text-blue-400"}`}>
-                            {isDefense ? "유죄" : "무죄"} {guiltyPct}%
-                          </div>
-                          <div className="text-[10px] text-zinc-500">AI 판결</div>
-                        </div>
-                      </div>
-                    );
-                  })()}
+                  {p.content ? (
+                    <p className="text-[11px] text-zinc-400 line-clamp-2 text-left break-all">
+                      {p.content}
+                    </p>
+                  ) : null}
                 </div>
 
                 {/* 하단 정보 */}
-                <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2">
+                <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2 mt-1">
                   {p.plaintiff === "익명" && p.defendant === "익명" ? (
                     <span>익명</span>
                   ) : (
@@ -2411,9 +2661,33 @@ function HomeContent() {
                     </>
                   )}
                 </div>
-                <p className="text-[11px] font-bold text-amber-400 mb-3 tabular-nums text-center">
+                <p className="text-[11px] font-bold text-amber-400 mb-2 tabular-nums text-center">
                   ⏳ 남은 시간 {formatCountdown(Math.max(0, getVotingEndsAt(p.created_at) - countdownNow))}
                 </p>
+                {/* 투표 현황 (작은 막대 그래프) */}
+                {(() => {
+                  const total = p.guilty + p.not_guilty;
+                  const guiltyPct = total ? Math.round((p.guilty / total) * 100) : 0;
+                  const notGuiltyPct = total ? Math.round((p.not_guilty / total) * 100) : 0;
+                  return (
+                    <div className="mb-2 space-y-1">
+                      <div className="flex items-center justify-between text-[10px] text-zinc-500">
+                        <span className="text-red-400 text-xs md:text-sm">유죄 {guiltyPct}% ({p.guilty}표)</span>
+                        <span className="text-blue-400 text-xs md:text-sm">무죄 {notGuiltyPct}% ({p.not_guilty}표)</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden flex">
+                        <div
+                          className="bg-red-500 h-full"
+                          style={{ width: `${guiltyPct}%` }}
+                        />
+                        <div
+                          className="bg-blue-500 h-full"
+                          style={{ width: `${notGuiltyPct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
                 
                 {/* 투표 버튼 - 무죄주장이면 무죄가 앞(왼쪽) */}
                 <div className="flex flex-col md:flex-row items-stretch md:items-center justify-center gap-2 mt-auto" onClick={(e) => e.stopPropagation()}>
@@ -2430,25 +2704,25 @@ function HomeContent() {
                           type="button"
                           disabled={votingId === p.id || !isVotingOpen(p.created_at, p.voting_ended_at)}
                           onClick={() => handleVote(p.id, first)}
-                          className={`w-full md:w-auto rounded-lg px-4 py-3 md:py-1.5 h-16 md:h-auto text-sm md:text-xs font-bold transition disabled:opacity-50 shadow-sm ${
+                          className={`w-full md:w-auto rounded-lg px-4 py-2 md:py-1.5 h-16 md:h-auto text-sm md:text-xs font-bold transition disabled:opacity-50 shadow-sm ${
                             first === "not_guilty"
                               ? (userVotes[p.id] === "not_guilty" ? "bg-blue-500/50 ring-1 ring-blue-400/60 text-blue-100" : "bg-blue-500/20 hover:bg-blue-500/30 text-blue-400")
                               : (userVotes[p.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
                           }`}
                         >
-                          {first === "not_guilty" ? "무죄" : "유죄"} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? p.not_guilty : p.guilty}표
+                          {first === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? p.not_guilty : p.guilty}표
                         </button>
                         <button
                           type="button"
                           disabled={votingId === p.id || !isVotingOpen(p.created_at, p.voting_ended_at)}
                           onClick={() => handleVote(p.id, second)}
-                          className={`w-full md:w-auto rounded-lg px-4 py-3 md:py-1.5 h-16 md:h-auto text-sm md:text-xs font-bold transition disabled:opacity-50 shadow-sm ${
+                          className={`w-full md:w-auto rounded-lg px-4 py-2 md:py-1.5 h-16 md:h-auto text-sm md:text-xs font-bold transition disabled:opacity-50 shadow-sm ${
                             second === "not_guilty"
                               ? (userVotes[p.id] === "not_guilty" ? "bg-blue-500/50 ring-1 ring-blue-400/60 text-blue-100" : "bg-blue-500/20 hover:bg-blue-500/30 text-blue-400")
                               : (userVotes[p.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
                           }`}
                         >
-                          {second === "not_guilty" ? "무죄" : "유죄"} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? p.not_guilty : p.guilty}표
+                          {second === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? p.not_guilty : p.guilty}표
                         </button>
                       </>
                     );
@@ -2511,7 +2785,7 @@ function HomeContent() {
 
         {completedPosts.length > 0 ? (
           <>
-            <div className="grid md:grid-cols-2 gap-6 mt-6">
+            <div className="grid md:grid-cols-2 gap-4 md:gap-6 mt-6 overflow-x-hidden break-all">
               {completedPosts.slice(0, 2).map((p) => (
                 <article
                   key={p.id}
@@ -2519,24 +2793,22 @@ function HomeContent() {
                   tabIndex={0}
                   onClick={() => setSelectedPost(p)}
                   onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
-                  className="group rounded-[1.75rem] border border-zinc-900 bg-zinc-950 p-5 hover:border-amber-500/40 transition-all cursor-pointer select-none flex flex-col relative"
+                  className="group w-full max-w-[calc(100vw-2rem)] mx-auto rounded-[1.75rem] border border-zinc-900 bg-zinc-950 p-4 md:p-6 hover:border-amber-500/40 transition-all cursor-pointer select-none flex flex-col gap-2 overflow-x-hidden break-all"
                 >
-                {/* 좌측 상단 카테고리 */}
-                {p.category ? (
-                  <div className="absolute top-3 left-3">
-                    <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-900/80 border border-zinc-800 text-zinc-400">
-                      {p.category}
-                    </span>
+                {/* 상단: 카테고리 + 사건 번호 + 메뉴 */}
+                <div className="flex items-start justify-between mb-4 text-[11px] text-zinc-500">
+                  <div className="flex items-center gap-2">
+                    {p.category ? (
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-900/80 border border-zinc-800 text-zinc-400">
+                        {p.category}
+                      </span>
+                    ) : null}
+                    {p.case_number != null ? (
+                      <span className="text-[10px] font-semibold text-amber-400">
+                        사건 번호 {p.case_number}
+                      </span>
+                    ) : null}
                   </div>
-                ) : null}
-
-                {/* 우측 상단 사건번호 및 메뉴 */}
-                <div className="absolute top-3 right-3 flex items-center gap-2">
-                  {p.case_number != null ? (
-                    <span className="text-[10px] font-bold text-amber-500/80">
-                      사건 번호 {p.case_number}
-                    </span>
-                  ) : null}
                   <div className="relative">
                     <button
                       type="button"
@@ -2604,43 +2876,20 @@ function HomeContent() {
                   </div>
                 </div>
 
-                {/* 중앙 제목 */}
-                <div className="pt-6 mb-4">
-                  <h4 className="text-lg md:text-xl font-bold group-hover:text-amber-400 transition line-clamp-2 text-center mb-3">
+                {/* 제목 + 내용 요약 */}
+                <div className="mb-2">
+                  <h4 className="text-base md:text-lg font-bold group-hover:text-amber-400 transition line-clamp-1 text-left break-all">
                     {p.title}
                   </h4>
-                  
-                  {/* 유무죄 % 비율 (AI 판결 기준) - 무죄주장/원고 무죄면 무죄 앞, 무죄 100% */}
-                  {(() => {
-                    const aiRatio = p.ratio ?? 50;
-                    const verdictText = typeof p.verdict === "string" ? p.verdict : "";
-                    const isDefense =
-                      p.trial_type === "DEFENSE" ||
-                      (verdictText.includes("원고 무죄") && p.trial_type !== "ACCUSATION");
-                    const notGuiltyPct = isDefense ? aiRatio : 100 - aiRatio;
-                    const guiltyPct = isDefense ? 100 - aiRatio : aiRatio;
-                    return (
-                      <div className="flex items-center justify-center gap-3 mb-3">
-                        <div className="text-center">
-                          <div className={`text-xl md:text-2xl font-black ${isDefense ? "text-blue-400" : "text-red-400"}`}>
-                            {isDefense ? "무죄" : "유죄"} {notGuiltyPct}%
-                          </div>
-                          <div className="text-[10px] text-zinc-500">AI 판결</div>
-                        </div>
-                        <div className="text-zinc-600 text-lg">vs</div>
-                        <div className="text-center">
-                          <div className={`text-xl md:text-2xl font-black ${isDefense ? "text-red-400" : "text-blue-400"}`}>
-                            {isDefense ? "유죄" : "무죄"} {guiltyPct}%
-                          </div>
-                          <div className="text-[10px] text-zinc-500">AI 판결</div>
-                        </div>
-                      </div>
-                    );
-                  })()}
+                  {p.content ? (
+                    <p className="text-[11px] text-zinc-400 line-clamp-2 text-left break-all">
+                      {p.content}
+                    </p>
+                  ) : null}
                 </div>
 
                 {/* 하단 정보 */}
-                <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2">
+                <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2 mt-1">
                   {p.plaintiff === "익명" && p.defendant === "익명" ? (
                     <span>익명</span>
                   ) : (
@@ -2651,30 +2900,41 @@ function HomeContent() {
                     </>
                   )}
                 </div>
-                <p className="text-[11px] text-zinc-500 mb-3 text-center">재판 종료</p>
+                <p className="text-[11px] text-zinc-500 mb-2 text-center">재판 종료</p>
                 
-                {/* 최종 투표 결과 - 무죄주장이면 무죄 앞 */}
-                <div className="flex items-center justify-center gap-2 mt-auto">
-                  {(() => {
-                    const total = p.guilty + p.not_guilty;
-                    const guiltyPct = total ? Math.round((p.guilty / total) * 100) : 0;
-                    const notGuiltyPct = total ? Math.round((p.not_guilty / total) * 100) : 0;
-                    const verdictText = typeof p.verdict === "string" ? p.verdict : "";
-                    const isDefense =
-                      p.trial_type === "DEFENSE" ||
-                      (verdictText.includes("원고 무죄") && p.trial_type !== "ACCUSATION");
+                {/* 투표 현황 (작은 막대 그래프 + 배지) */}
+                {(() => {
+                  const total = p.guilty + p.not_guilty;
+                  const guiltyPct = total ? Math.round((p.guilty / total) * 100) : 0;
+                  const notGuiltyPct = total ? Math.round((p.not_guilty / total) * 100) : 0;
+                  const verdictText = typeof p.verdict === "string" ? p.verdict : "";
+                  const isDefense =
+                    p.trial_type === "DEFENSE" ||
+                    (verdictText.includes("원고 무죄") && p.trial_type !== "ACCUSATION");
                     return (
-                      <>
-                        <span className={`rounded-lg px-4 py-1.5 text-xs font-bold ${isDefense ? "bg-blue-500/20 text-blue-400" : "bg-red-500/20 text-red-400"}`}>
-                          {isDefense ? "무죄" : "유죄"} ({isDefense ? notGuiltyPct : guiltyPct}%) {isDefense ? p.not_guilty : p.guilty}표
-                        </span>
-                        <span className={`rounded-lg px-4 py-1.5 text-xs font-bold ${isDefense ? "bg-red-500/20 text-red-400" : "bg-blue-500/20 text-blue-400"}`}>
-                          {isDefense ? "유죄" : "무죄"} ({isDefense ? guiltyPct : notGuiltyPct}%) {isDefense ? p.guilty : p.not_guilty}표
-                        </span>
-                      </>
+                      <div className="mt-auto space-y-1.5">
+                        <div className="flex items-center justify-between text-[10px] text-zinc-500">
+                          <span className="text-red-400 text-xs md:text-sm">유죄 {guiltyPct}% ({p.guilty}표)</span>
+                          <span className="text-blue-400 text-xs md:text-sm">무죄 {notGuiltyPct}% ({p.not_guilty}표)</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden flex">
+                          <div
+                            className="bg-red-500 h-full"
+                            style={{ width: `${guiltyPct}%` }}
+                          />
+                          <div
+                            className="bg-blue-500 h-full"
+                            style={{ width: `${notGuiltyPct}%` }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-center gap-2 text-[10px]">
+                          <span className={`px-2 py-0.5 rounded-full font-bold ${isDefense ? "bg-blue-500/20 text-blue-300" : "bg-red-500/20 text-red-300"}`}>
+                            {isDefense ? "무죄 우세" : "유죄 우세"}
+                          </span>
+                        </div>
+                      </div>
                     );
-                  })()}
-                </div>
+                })()}
                 </article>
               ))}
             </div>
@@ -2938,7 +3198,7 @@ function HomeContent() {
       {/* 최근 판결문 상세 모달 */}
       {selectedPost ? (
         <div
-          className="fixed inset-0 z-[110] flex items-center justify-center overflow-hidden p-4"
+          className="fixed inset-0 z-[110] flex items-center justify-center overflow-hidden p-3 md:p-4"
           role="dialog"
           aria-modal="true"
           aria-label="판결문 상세"
@@ -2953,7 +3213,7 @@ function HomeContent() {
             }}
           />
           <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-zinc-800 bg-zinc-950 shadow-[0_0_60px_rgba(0,0,0,0.8)]">
-            <div className="sticky top-0 z-10 flex items-center justify-between gap-4 p-6 border-b border-zinc-800 bg-zinc-950">
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-4 px-3 py-4 md:p-6 border-b border-zinc-800 bg-zinc-950">
               <h3 className="text-lg font-black text-amber-500">판결문 상세</h3>
               <button
                 type="button"
@@ -2963,7 +3223,7 @@ function HomeContent() {
                 닫기
               </button>
             </div>
-            <div className="p-6 space-y-6">
+            <div className="px-3 py-4 space-y-6 md:p-6">
               {(() => {
                 const isFinished = !isVotingOpen(selectedPost.created_at, selectedPost.voting_ended_at);
                 const total = selectedPost.guilty + selectedPost.not_guilty;
@@ -3023,14 +3283,14 @@ function HomeContent() {
                       </div>
                     ) : null}
                     <div className="flex items-start justify-between gap-4 mb-5">
-                      <div className="min-w-0 flex-1">
+                        <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
                           {!isFinished && isUrgent(selectedPost.created_at) ? (
                             <span className="text-xs font-black text-red-500">[🔥 판결 임박]</span>
                           ) : null}
                           <span className="text-xs font-black tracking-widest uppercase text-zinc-500">사건 제목</span>
                         </div>
-                        <h4 className="text-lg sm:text-xl md:text-2xl font-bold text-zinc-100">{selectedPost.title}</h4>
+                        <h4 className="text-lg sm:text-xl md:text-2xl font-bold text-zinc-100 break-keep">{selectedPost.title}</h4>
                       </div>
                       <span className="text-xs font-black tracking-widest uppercase text-zinc-500 shrink-0">
                         사건 번호 {selectedPost.case_number != null ? selectedPost.case_number : "—"}
@@ -3156,6 +3416,20 @@ function HomeContent() {
                           <button
                             type="button"
                             onClick={() => {
+                              setEditPostId(selectedPost.id);
+                              setEditTitle(selectedPost.title);
+                              setEditContent(selectedPost.content ?? "");
+                              setEditPassword("");
+                              setEditError(null);
+                              setPostMenuOpenId(null);
+                            }}
+                            className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
+                          >
+                            판결문 수정
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
                               setDeletePostId(selectedPost.id);
                               setPostMenuOpenId(null);
                             }}
@@ -3179,16 +3453,32 @@ function HomeContent() {
                   ) : null}
                 </div>
               </div>
-              {selectedPost.content ? (
+              {/* 섹션 1: 📜 사건의 발단 */}
+              <section className="space-y-3">
                 <div>
-                  <div className="text-xs font-black tracking-widest uppercase text-zinc-500 mb-2">사건 경위 (상세 내용)</div>
-                  <p className="text-sm sm:text-base text-zinc-300 leading-relaxed whitespace-pre-wrap rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3">
-                    {selectedPost.content}
+                  <div className="text-xs font-black tracking-widest uppercase text-zinc-400">
+                    📜 사건의 발단
+                  </div>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    원고가 직접 작성한 사건의 경위입니다.
                   </p>
                 </div>
-              ) : null}
-              
-              {/* AI 판결 기준 유무죄 % - 무죄주장/원고 무죄면 무죄 앞, 무죄 100% */}
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 w-full overflow-x-hidden min-w-0">
+                  {selectedPost.content ? (
+                    <p className="text-sm sm:text-base text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
+                      {selectedPost.content}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-zinc-500">
+                      작성된 사건 경위가 없습니다.
+                    </p>
+                  )}
+                </div>
+              </section>
+
+              <div className="my-6 border-t border-dashed border-zinc-700" />
+
+              {/* 섹션 2: ⚖️ AI 대법관 선고 - 메인 영역 */}
               {(() => {
                 const isFinished = !isVotingOpen(selectedPost.created_at, selectedPost.voting_ended_at);
                 const aiRatio = selectedPost.ratio ?? 50;
@@ -3198,53 +3488,105 @@ function HomeContent() {
                   (verdictText.includes("원고 무죄") && selectedPost.trial_type !== "ACCUSATION");
                 const notGuiltyPct = isDefense ? aiRatio : 100 - aiRatio;
                 const guiltyPct = isDefense ? 100 - aiRatio : aiRatio;
-                
-                if (isFinished) {
-                  return (
-                    <div className="text-xs text-zinc-600 text-center mb-4">
-                      AI 판결: {isDefense ? "무죄" : "유죄"} {notGuiltyPct}% · {isDefense ? "유죄" : "무죄"} {guiltyPct}%
-                    </div>
-                  );
-                }
-                
+                const primaryLabel = isDefense ? "무죄" : "유죄";
+                const primaryPct = isDefense ? notGuiltyPct : guiltyPct;
+                const isFiftyFifty = guiltyPct === 50 && notGuiltyPct === 50;
+                const neutralReason =
+                  "본 사건은 원고와 피고의 주장이 법리적으로 팽팽히 맞서고 있어, 현재의 알고리즘으로는 확정적 판결을 내릴 수 없는 '법리적 난제'입니다.";
+
                 return (
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-4 mb-4">
-                    <div className="text-xs font-black tracking-widest uppercase text-zinc-400 mb-3">AI 판결</div>
-                    <div className="flex items-center justify-center gap-6">
-                      <div className="text-center">
-                        <div className={`text-2xl md:text-3xl font-black mb-1 ${isDefense ? "text-blue-400" : "text-red-400"}`}>
-                          {isDefense ? "무죄" : "유죄"} {notGuiltyPct}%
-                        </div>
-                        <div className="text-xs text-zinc-500">{isDefense ? "원고 무죄" : "피고 과실"}</div>
+                  <section className="space-y-4">
+                    <div>
+                      <div className="text-xs font-black tracking-widest uppercase text-zinc-400">
+                        ⚖️ AI 대법관 선고
                       </div>
-                      <div className="text-zinc-600 text-xl">vs</div>
-                      <div className="text-center">
-                        <div className={`text-2xl md:text-3xl font-black mb-1 ${isDefense ? "text-red-400" : "text-blue-400"}`}>
-                          {isDefense ? "유죄" : "무죄"} {guiltyPct}%
-                        </div>
-                        <div className="text-xs text-zinc-500">{isDefense ? "피고 과실" : "원고 과실"}</div>
-                      </div>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        이 사건에 대한 AI 대법관의 최종 판단과 그 근거입니다.
+                      </p>
                     </div>
-                  </div>
+                    <div className="relative overflow-hidden rounded-2xl border border-amber-400/40 bg-gradient-to-br from-amber-500/15 via-zinc-900 to-zinc-950 px-3 py-4 md:px-5 md:py-5 shadow-[0_0_35px_rgba(245,158,11,0.25)] w-full">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs sm:text-base font-semibold text-amber-100 min-w-0 truncate">
+                          {isFinished ? "AI 최종 판결" : "AI 현재 예측"}
+                        </span>
+                        <span className="inline-flex shrink-0 items-center rounded-full border border-amber-400/80 bg-amber-500/15 px-2.5 py-0.5 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-amber-200 shadow-[0_0_18px_rgba(245,158,11,0.7)]">
+                          AI JUDGMENT
+                        </span>
+                      </div>
+                      <div className="mt-3 md:mt-4 text-center space-y-1 md:space-y-2">
+                        {isFiftyFifty ? (
+                          <>
+                            <p className="text-lg sm:text-2xl md:text-3xl font-black text-amber-400 whitespace-nowrap">
+                              [ ⚖️ 판결 유보 : 판단 불가 ]
+                            </p>
+                            <p className="text-[11px] sm:text-xs text-amber-400/90 whitespace-nowrap tabular-nums">
+                              유죄 50% · 무죄 50%
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p
+                              className={`text-lg sm:text-2xl md:text-3xl font-black whitespace-nowrap ${
+                                primaryLabel === "유죄" ? "text-red-300" : "text-blue-300"
+                              }`}
+                            >
+                              {primaryLabel} <span className="tabular-nums">{primaryPct}%</span>
+                            </p>
+                            <p className="text-[11px] sm:text-xs text-zinc-300 whitespace-nowrap">
+                              유죄 {guiltyPct}% · 무죄 {notGuiltyPct}%
+                            </p>
+                          </>
+                        )}
+                      </div>
+                      <div className="mt-3 md:mt-4 relative h-2 rounded-full bg-zinc-800 overflow-visible flex w-full">
+                        <div
+                          className={`h-full rounded-l-full ${
+                            isFiftyFifty ? "bg-red-500/80" : primaryLabel === "유죄" ? "bg-red-500/80" : "bg-blue-500/80"
+                          }`}
+                          style={{
+                            width: `${isFiftyFifty ? 50 : primaryLabel === "유죄" ? guiltyPct : notGuiltyPct}%`,
+                          }}
+                        />
+                        {isFiftyFifty ? (
+                          <span
+                            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex h-5 w-5 items-center justify-center rounded-full border-2 border-amber-400/90 bg-zinc-900 text-[10px] font-black text-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.5)]"
+                            aria-hidden
+                          >
+                            ⚡
+                          </span>
+                        ) : null}
+                        <div
+                          className={`h-full rounded-r-full ${
+                            isFiftyFifty ? "bg-blue-500/80" : primaryLabel === "유죄" ? "bg-blue-500/50" : "bg-red-500/50"
+                          }`}
+                          style={{
+                            width: `${isFiftyFifty ? 50 : primaryLabel === "유죄" ? notGuiltyPct : guiltyPct}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="mt-3 md:mt-4 text-[11px] sm:text-xs font-semibold text-amber-100/90">
+                        AI 판결 근거
+                      </div>
+                      <p className="mt-1 text-xs sm:text-base text-amber-50 leading-relaxed whitespace-pre-wrap break-keep">
+                        {isFiftyFifty ? neutralReason : verdictText || "AI 판결 이유가 아직 준비되지 않았습니다."}
+                      </p>
+                    </div>
+                  </section>
                 );
               })()}
-              
-              {/* 최종 판결 - 판결 완료 시에만 표시 */}
-              {!isVotingOpen(selectedPost.created_at, selectedPost.voting_ended_at) ? (
-                <div className="rounded-2xl border-2 border-amber-500/40 bg-amber-500/15 px-5 py-5 shadow-[0_0_24px_rgba(245,158,11,0.12)]">
-                  <div className="text-xs font-black tracking-widest uppercase text-amber-300 mb-3">최종 판결</div>
-                  <p className="text-base sm:text-lg md:text-xl font-bold text-amber-50 leading-relaxed whitespace-pre-wrap">
-                    {selectedPost.verdict}
-                  </p>
+
+              <div className="my-6 border-t border-dashed border-zinc-700" />
+
+              {/* 섹션 3: 👥 배심원 평결 및 한마디 */}
+              <div className="mb-4">
+                <div className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                  <span>👥 배심원 평결 및 한마디</span>
                 </div>
-              ) : (
-                <div className="rounded-2xl border-2 border-amber-500/40 bg-amber-500/15 px-5 py-5 shadow-[0_0_24px_rgba(245,158,11,0.12)]">
-                  <div className="text-xs font-black tracking-widest uppercase text-amber-300 mb-3">AI 판결</div>
-                  <p className="text-base sm:text-lg md:text-xl font-bold text-amber-50 leading-relaxed whitespace-pre-wrap">
-                    {selectedPost.verdict}
-                  </p>
-                </div>
-              )}
+                <p className="mt-1 text-xs text-zinc-500">
+                  AI의 판결에 대해 배심원들이 어떻게 생각하는지 한눈에 볼 수 있습니다.
+                </p>
+              </div>
+
               {/* 상세 모달 내 투표 - 무죄주장이면 무죄가 앞(왼쪽) */}
               {isVotingOpen(selectedPost.created_at, selectedPost.voting_ended_at) ? (
                 <div className="space-y-3">
@@ -3262,25 +3604,25 @@ function HomeContent() {
                             type="button"
                             disabled={votingId === selectedPost.id}
                             onClick={() => handleVote(selectedPost.id, first)}
-                            className={`w-full md:w-auto rounded-lg px-4 py-3 md:py-1.5 h-16 md:h-auto text-sm md:text-xs font-bold transition disabled:opacity-50 shadow-sm ${
+                            className={`w-full md:w-auto rounded-lg px-4 py-2 md:py-1.5 h-16 md:h-auto text-sm md:text-xs font-bold transition disabled:opacity-50 shadow-sm ${
                               first === "not_guilty"
                                 ? (userVotes[selectedPost.id] === "not_guilty" ? "bg-blue-500/50 ring-1 ring-blue-400/60 text-blue-100" : "bg-blue-500/20 hover:bg-blue-500/30 text-blue-400")
                                 : (userVotes[selectedPost.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
                             }`}
                           >
-                            {first === "not_guilty" ? "무죄" : "유죄"} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
+                            {first === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
                           </button>
                           <button
                             type="button"
                             disabled={votingId === selectedPost.id}
                             onClick={() => handleVote(selectedPost.id, second)}
-                            className={`w-full md:w-auto rounded-lg px-4 py-3 md:py-1.5 h-16 md:h-auto text-sm md:text-xs font-bold transition disabled:opacity-50 shadow-sm ${
+                            className={`w-full md:w-auto rounded-lg px-4 py-2 md:py-1.5 h-16 md:h-auto text-sm md:text-xs font-bold transition disabled:opacity-50 shadow-sm ${
                               second === "not_guilty"
                                 ? (userVotes[selectedPost.id] === "not_guilty" ? "bg-blue-500/50 ring-1 ring-blue-400/60 text-blue-100" : "bg-blue-500/20 hover:bg-blue-500/30 text-blue-400")
                                 : (userVotes[selectedPost.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
                             }`}
                           >
-                            {second === "not_guilty" ? "무죄" : "유죄"} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
+                            {second === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
                           </button>
                         </>
                       );
@@ -3367,10 +3709,130 @@ function HomeContent() {
                 </div>
               ) : null}
 
+              {/* 배심원 평결: 유죄/무죄 비율 수평 막대 그래프 (무죄주장일 땐 무죄가 왼쪽). 50:50 시 공유 카드 펀치라인: "당신은 배심원들도 포기한 '희대의 난제' 제조기입니다!" */}
+              {(() => {
+                const totalVotes = selectedPost.guilty + selectedPost.not_guilty;
+                if (!totalVotes) return null;
+
+                const guiltyVotes = selectedPost.guilty;
+                const notGuiltyVotes = selectedPost.not_guilty;
+                const isJuryFiftyFifty = guiltyVotes === notGuiltyVotes;
+
+                const rawGuiltyPct = Math.round((selectedPost.guilty / totalVotes) * 100);
+                const rawNotGuiltyPct = 100 - rawGuiltyPct;
+                const isDefense = selectedPost.trial_type === "DEFENSE";
+
+                const leftLabel = isDefense ? "무죄" : "유죄";
+                const rightLabel = isDefense ? "유죄" : "무죄";
+                const leftPct = isDefense ? rawNotGuiltyPct : rawGuiltyPct;
+                const rightPct = isDefense ? rawGuiltyPct : rawNotGuiltyPct;
+                const leftColor = isDefense ? "#3b82f6" : "#ef4444";
+                const rightColor = isDefense ? "#ef4444" : "#3b82f6";
+                const leftIcon = isDefense ? "⚖️" : "🔥";
+                const rightIcon = isDefense ? "🔥" : "⚖️";
+
+                return (
+                  <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/60 px-3 py-4 md:px-4 space-y-3 w-full">
+                    {isJuryFiftyFifty ? (
+                      <div className="text-center">
+                        <p className="text-sm sm:text-base font-black text-amber-400 whitespace-nowrap">
+                          [ ⚖️ 민심 교착 : 세기의 난제 ]
+                        </p>
+                        <p className="mt-0.5 text-[11px] sm:text-xs text-amber-400/80 tabular-nums whitespace-nowrap">
+                          유죄 50% · 무죄 50%
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-2 text-[11px] sm:text-sm text-zinc-200 w-full min-w-0">
+                        <div
+                          className={`flex items-center gap-1 min-w-0 shrink-0 whitespace-nowrap ${
+                            leftLabel === "유죄" ? "text-red-300" : "text-blue-300"
+                          }`}
+                        >
+                          <span>{leftIcon}</span>
+                          <span className="font-semibold tabular-nums">
+                            {leftLabel} {leftPct}%
+                          </span>
+                        </div>
+                        <div
+                          className={`flex items-center gap-1 min-w-0 shrink-0 whitespace-nowrap ${
+                            rightLabel === "유죄" ? "text-red-300" : "text-blue-300"
+                          }`}
+                        >
+                          <span className="font-semibold tabular-nums">
+                            {rightLabel} {rightPct}%
+                          </span>
+                          <span>{rightIcon}</span>
+                        </div>
+                      </div>
+                    )}
+                    <div className="relative mt-2 h-8 w-full rounded-full bg-zinc-800 overflow-visible">
+                      <div className="absolute inset-0 flex items-center justify-between px-3 text-[10px] sm:text-xs font-semibold text-zinc-100/70 pointer-events-none z-[1]">
+                        {!isJuryFiftyFifty && (
+                          <>
+                            <span className="flex items-center gap-1">
+                              {leftIcon} <span>{leftLabel}</span>
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <span>{rightLabel}</span> {rightIcon}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      <div className="relative flex h-full w-full rounded-full overflow-visible">
+                        <div
+                          className={`h-full transition-all duration-1000 rounded-l-full ${isJuryFiftyFifty ? "animate-pulse" : ""}`}
+                          style={{
+                            width: `${juryBarAnimated ? (isJuryFiftyFifty ? 50 : leftPct) : 0}%`,
+                            backgroundColor: leftColor,
+                            minWidth: isJuryFiftyFifty ? "50%" : undefined,
+                          }}
+                        />
+                        {isJuryFiftyFifty ? (
+                          <span
+                            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex h-6 w-6 items-center justify-center rounded-full border-2 border-amber-400/90 bg-zinc-900 text-xs font-black text-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.5)] animate-pulse"
+                            aria-hidden
+                          >
+                            ⚡
+                          </span>
+                        ) : null}
+                        <div
+                          className={`h-full transition-all duration-1000 rounded-r-full ${isJuryFiftyFifty ? "animate-pulse" : ""}`}
+                          style={{
+                            width: `${juryBarAnimated ? (isJuryFiftyFifty ? 50 : rightPct) : 0}%`,
+                            backgroundColor: rightColor,
+                            minWidth: isJuryFiftyFifty ? "50%" : undefined,
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-center text-zinc-400">
+                      {isJuryFiftyFifty ? (
+                        <>
+                          배심원{" "}
+                          <span className="font-semibold text-amber-300">
+                            {totalVotes.toLocaleString("ko-KR")}
+                          </span>
+                          명이 참여했으나, 누구도 승리를 장담할 수 없는 팽팽한 대립이 이어지고 있습니다. 당신의 한 표가 정의를 결정합니다!
+                        </>
+                      ) : (
+                        <>
+                          지금까지{" "}
+                          <span className="font-semibold text-amber-300">
+                            {totalVotes.toLocaleString("ko-KR")}
+                          </span>
+                          명의 배심원이 참여했습니다.
+                        </>
+                      )}
+                    </p>
+                  </div>
+                );
+              })()}
+
               {/* 배심원 한마디 (대댓글 지원) */}
               <div className="border-t border-zinc-800 pt-6">
                 <div className="mb-3 text-xs font-black tracking-widest uppercase text-zinc-500">
-                  배심원 한마디
+                  배심원 한마디 (댓글)
                 </div>
                 {commentsError ? (
                   <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200 mb-3">
@@ -3385,8 +3847,8 @@ function HomeContent() {
                         ? (replyTarget.content.replace(/\s+/g, " ").trim().slice(0, 40) + (replyTarget.content.replace(/\s+/g, " ").trim().length > 40 ? "…" : ""))
                         : "";
                       return (
-                        <div className="flex items-center justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                          <span className="min-w-0 flex-1 truncate">
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] sm:text-xs text-amber-200 min-w-0">
+                          <span className="min-w-0 flex-1 truncate break-keep">
                             {summary ? `"${summary}" 에 대한 답글 작성 중` : "답글 작성 중"}
                           </span>
                           <button type="button" onClick={() => { setReplyToId(null); setCommentInput(""); }} className="shrink-0 font-bold hover:underline">
@@ -3403,7 +3865,7 @@ function HomeContent() {
                     disabled={commentSubmitting}
                     placeholder={replyToId ? "대댓글을 입력하세요 (최대 2000자)" : "익명으로 배심원 한마디를 남기세요 (최대 2000자)"}
                     maxLength={2000}
-                    className="w-full min-h-[80px] resize-y rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 transition disabled:opacity-60"
+                    className="w-full min-h-[80px] resize-y rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-xs sm:text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 transition disabled:opacity-60 md:px-4 md:py-3"
                   />
                   <input
                     type="password"
@@ -3412,14 +3874,14 @@ function HomeContent() {
                     disabled={commentSubmitting}
                     placeholder="삭제 비밀번호 (삭제 시 필요, 20자 이내)"
                     maxLength={20}
-                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-amber-500/60"
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-xs sm:text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-amber-500/60 md:px-4"
                   />
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-zinc-500">{commentInput.length}/2000</span>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] sm:text-xs text-zinc-500 whitespace-nowrap">{commentInput.length}/2000</span>
                     <button
                       type="submit"
                       disabled={!commentInput.trim() || !commentFormPassword.trim() || commentSubmitting}
-                      className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-black hover:bg-amber-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="rounded-xl bg-amber-500 px-3 py-1.5 text-xs sm:text-sm font-bold text-black hover:bg-amber-400 transition disabled:opacity-50 disabled:cursor-not-allowed md:px-4 md:py-2"
                     >
                       {commentSubmitting ? "등록 중..." : replyToId ? "답글 등록" : "한마디 등록"}
                     </button>
@@ -3429,26 +3891,18 @@ function HomeContent() {
                   <div className="mt-4 text-sm text-zinc-500">한마디 불러오는 중...</div>
                 ) : (
                   <>
-                    <div className="mt-4 flex items-center gap-4 text-[11px] text-zinc-500">
+                    <div className="mt-4 flex flex-wrap items-center gap-2 sm:gap-4 text-[11px] text-zinc-500">
                       <button
                         type="button"
                         onClick={() => setCommentSort("latest")}
-                        className={
-                          commentSort === "latest"
-                            ? "font-semibold text-zinc-100"
-                            : "text-zinc-500 hover:text-zinc-300"
-                        }
+                        className={`shrink-0 whitespace-nowrap ${commentSort === "latest" ? "font-semibold text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
                       >
                         최신순
                       </button>
                       <button
                         type="button"
                         onClick={() => setCommentSort("popular")}
-                        className={
-                          commentSort === "popular"
-                            ? "font-semibold text-zinc-100"
-                            : "text-zinc-500 hover:text-zinc-300"
-                        }
+                        className={`shrink-0 whitespace-nowrap ${commentSort === "popular" ? "font-semibold text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
                       >
                         인기순(발도장순)
                       </button>
@@ -3456,36 +3910,37 @@ function HomeContent() {
                     {commentTree.top.length === 0 ? (
                       <p className="mt-4 text-sm text-zinc-500">아직 배심원 한마디가 없습니다.</p>
                     ) : (
-                      <ul className="mt-4 space-y-4">
+                      <div className="mt-4 max-h-[260px] overflow-y-auto pr-1">
+                        <ul className="space-y-4">
                     {commentTree.top.map((c) => {
                       const isOperator = c.is_operator === true;
                       return (
-                      <li key={c.id} className="space-y-0">
-                        <div className={`rounded-xl border px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+                      <li key={c.id} className="space-y-0 w-full min-w-0">
+                        <div className={`rounded-xl border px-3 py-2.5 md:px-4 md:py-3 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap break-keep w-full min-w-0 ${
                           isOperator 
                             ? "border-amber-500/40 bg-amber-500/10 text-zinc-100 shadow-[0_0_12px_rgba(245,158,11,0.15)]" 
                             : "border-zinc-800 bg-zinc-900/80 text-zinc-200"
                         }`}>
-                          <div className="mb-1 flex items-center gap-2 text-[11px]">
-                            <span className={`font-bold ${isOperator ? "text-amber-400" : "text-amber-300"}`}>
+                          <div className="mb-1 flex flex-wrap items-center gap-1.5 sm:gap-2 text-[10px] sm:text-[11px] min-w-0">
+                            <span className={`font-bold shrink-0 whitespace-nowrap ${isOperator ? "text-amber-400" : "text-amber-300"}`}>
                               {jurorLabels[c.author_id ?? "__anon__"] ?? "배심원"}
                             </span>
                             {isOperator ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/30 px-2 py-0.5 text-[10px] font-black text-amber-200 border border-amber-500/50">
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/30 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-black text-amber-200 border border-amber-500/50 whitespace-nowrap">
                                 ⚖️ 대법관
                               </span>
                             ) : null}
                             {selectedPost.author_id && c.author_id === selectedPost.author_id ? (
-                              <span className="inline-flex items-center rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300">
+                              <span className="inline-flex shrink-0 items-center rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-bold text-amber-300 whitespace-nowrap">
                                 작성자
                               </span>
                             ) : null}
                           </div>
-                          <div className={isOperator ? "font-semibold" : ""}>{c.content}</div>
-                          <div className="mt-2 flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-3 text-[11px] text-zinc-500">
+                          <div className={`min-w-0 break-keep ${isOperator ? "font-semibold" : ""}`}>{c.content}</div>
+                          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-[10px] sm:text-[11px] text-zinc-500 min-w-0">
                               {c.created_at ? (
-                                <span>
+                                <span className="whitespace-nowrap tabular-nums">
                                   {new Date(c.created_at).toLocaleString("ko-KR", {
                                     dateStyle: "short",
                                     timeStyle: "short",
@@ -3515,24 +3970,24 @@ function HomeContent() {
                                     }
                                   } catch {}
                                 }}
-                                className={`flex items-center gap-1 text-[11px] ${
+                                className={`flex items-center gap-0.5 sm:gap-1 text-[10px] sm:text-[11px] shrink-0 whitespace-nowrap ${
                                   likedCommentIds.has(c.id) ? "text-amber-400 font-bold" : "text-zinc-500 hover:text-zinc-300"
                                 }`}
                               >
                                 <span>🐾</span>
-                                <span>{c.likes}</span>
+                                <span className="tabular-nums">{c.likes}</span>
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setReplyToId(replyToId === c.id ? null : c.id)}
-                                className="flex items-center gap-1 text-[11px] hover:text-zinc-300"
+                                className="flex items-center gap-0.5 sm:gap-1 text-[10px] sm:text-[11px] hover:text-zinc-300 shrink-0 whitespace-nowrap"
                                 aria-label={replyToId === c.id ? "답글 취소" : "답글"}
                               >
                                 <span aria-hidden>💬</span>
                                 {replyToId === c.id ? "취소" : ""}
                               </button>
                             </div>
-                            <div className="relative">
+                            <div className="relative shrink-0">
                               <button
                                 type="button"
                                 onClick={() =>
@@ -3600,7 +4055,7 @@ function HomeContent() {
                           return (
                           <div
                             key={reply.id}
-                            className={`ml-6 pl-4 py-2 border-l-2 rounded-r-lg relative cursor-pointer transition ${
+                            className={`ml-4 sm:ml-6 pl-3 sm:pl-4 py-1.5 sm:py-2 border-l-2 rounded-r-lg relative cursor-pointer transition w-full min-w-0 ${
                               isReplyOperator
                                 ? "border-amber-500/50 bg-amber-500/15 hover:bg-amber-500/20 shadow-[0_0_8px_rgba(245,158,11,0.1)]"
                                 : "border-amber-500/30 bg-zinc-900/50 hover:bg-zinc-800/50"
@@ -3610,28 +4065,28 @@ function HomeContent() {
                             }}
                           >
                             <span
-                              className={`absolute -left-[0.6rem] top-2.5 text-sm font-bold leading-none ${
+                              className={`absolute -left-[0.6rem] top-2 text-xs sm:text-sm font-bold leading-none ${
                                 isReplyOperator ? "text-amber-400" : "text-amber-500/80"
                               }`}
                               aria-hidden
                             >
                               ㄴ
                             </span>
-                            <div className="pl-2">
+                            <div className="pl-2 min-w-0">
                               {isReplyOperator ? (
-                                <span className="inline-flex items-center gap-1 mb-1 rounded-full bg-amber-500/30 px-1.5 py-0.5 text-[9px] font-black text-amber-200 border border-amber-500/50">
+                                <span className="inline-flex shrink-0 items-center gap-1 mb-1 rounded-full bg-amber-500/30 px-1.5 py-0.5 text-[9px] font-black text-amber-200 border border-amber-500/50 whitespace-nowrap">
                                   ⚖️ 대법관
                                 </span>
                               ) : null}
-                              <p className={`text-sm leading-relaxed whitespace-pre-wrap ${
+                              <p className={`text-xs sm:text-sm leading-relaxed whitespace-pre-wrap break-keep min-w-0 ${
                                 isReplyOperator ? "text-zinc-100 font-semibold" : "text-zinc-300"
                               }`}>
                                 {reply.content}
                               </p>
-                              <div className="mt-1 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
-                                <div className="flex items-center gap-3 text-[11px] text-zinc-500">
+                              <div className="mt-1 flex flex-wrap items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-[10px] sm:text-[11px] text-zinc-500 min-w-0">
                                   {reply.created_at ? (
-                                    <span>
+                                    <span className="whitespace-nowrap tabular-nums">
                                       {new Date(reply.created_at).toLocaleString("ko-KR", {
                                         dateStyle: "short",
                                         timeStyle: "short",
@@ -3664,15 +4119,15 @@ function HomeContent() {
                                         }
                                       } catch {}
                                     }}
-                                    className={`flex items-center gap-1 text-[11px] ${
+                                    className={`flex items-center gap-0.5 sm:gap-1 text-[10px] sm:text-[11px] shrink-0 whitespace-nowrap ${
                                       likedCommentIds.has(reply.id) ? "text-amber-400 font-bold" : "text-zinc-500 hover:text-zinc-300"
                                     }`}
                                   >
                                     <span>🐾</span>
-                                    <span>{reply.likes}</span>
+                                    <span className="tabular-nums">{reply.likes}</span>
                                   </button>
                                 </div>
-                                <div className="relative">
+                                <div className="relative shrink-0">
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -3743,10 +4198,11 @@ function HomeContent() {
                           </div>
                           );
                         })}
-                      </li>
-                      );
-                    })}
-                  </ul>
+                          </li>
+                        );
+                      })}
+                        </ul>
+                      </div>
                     )}
                   </>
                 )}
