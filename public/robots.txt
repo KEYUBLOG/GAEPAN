@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://www.google.com/url?sa=E&source=gmail&q=https://gaepanai.com/sitemap.xml
