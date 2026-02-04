@@ -593,7 +593,7 @@ export default function OngoingTrialsPage() {
     <div className="min-h-screen bg-black overflow-x-hidden">
       {/* 네비게이션 */}
       <nav className="px-4 py-3 md:px-6 md:py-4 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50">
-        <Link href="/" className="text-2xl font-black tracking-tighter text-amber-500 italic max-w-[40%] truncate">
+        <Link href="/" className="shrink-0 text-2xl font-black tracking-tighter text-amber-500 italic">
           GAEPAN
         </Link>
         <div className="flex items-center">
