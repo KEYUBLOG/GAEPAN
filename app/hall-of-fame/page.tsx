@@ -582,12 +582,10 @@ export default function HallOfFamePage() {
     }
   };
 
-  // 주차별 명예의 전당 계산
+  // 주차별 명예의 전당 계산 (현재 주차는 아직 끝나지 않았으므로 제외)
   const weeklyWinners = useMemo(() => {
     const ended = posts.filter((p) => !isVotingOpen(p.created_at, p.voting_ended_at) && p.guilty > 0);
-    const now = new Date();
-    const startOfToday = new Date(now);
-    startOfToday.setHours(0, 0, 0, 0);
+    const currentWeek = getCurrentWeek();
 
     const byWeek = new Map<string, { year: number; week: number; post: typeof ended[0] }>();
 
@@ -595,13 +593,8 @@ export default function HallOfFamePage() {
       const key = getWeekFromEndAt(p.voting_ended_at, p.created_at);
       if (!key) continue;
 
-      // 이 글의 \"투표 종료 시각\"이 오늘 이후라면 (오늘 포함) → 아직 진행 중인 주로 보고 스킵
-      const endedTime = (() => {
-        if (p.voting_ended_at) return new Date(p.voting_ended_at).getTime();
-        const created = p.created_at ? new Date(p.created_at).getTime() : 0;
-        return created + TRIAL_DURATION_MS;
-      })();
-      if (endedTime >= startOfToday.getTime()) continue;
+      // 투표 종료 주차가 현재 주차와 같으면 아직 주가 끝나지 않은 것이므로 제외
+      if (key.year === currentWeek.year && key.week === currentWeek.week) continue;
 
       const k = `${key.year}-${key.week}`;
       const cur = byWeek.get(k);

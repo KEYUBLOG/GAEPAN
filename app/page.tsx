@@ -1477,9 +1477,7 @@ function HomeContent() {
 
   const weeklyWinners = useMemo(() => {
     const ended = recentPosts.filter((p) => !isVotingOpen(p.created_at, p.voting_ended_at) && p.guilty > 0);
-    const now = new Date();
-    const startOfToday = new Date(now);
-    startOfToday.setHours(0, 0, 0, 0);
+    const currentWeek = getCurrentWeek();
 
     const byWeek = new Map<string, { year: number; week: number; post: typeof ended[0] }>();
 
@@ -1487,11 +1485,8 @@ function HomeContent() {
       const key = getWeekFromEndAt(p.voting_ended_at, p.created_at);
       if (!key) continue;
 
-      // 투표 종료 시각이 오늘 이후(오늘 포함)인 사건은 아직 진행 중인 주로 보고 제외
-      const endedTime = p.voting_ended_at
-        ? new Date(p.voting_ended_at).getTime()
-        : (p.created_at ? new Date(p.created_at).getTime() : 0) + TRIAL_DURATION_MS;
-      if (endedTime >= startOfToday.getTime()) continue;
+      // 투표 종료 주차가 현재 주차와 같으면 아직 주가 끝나지 않은 것이므로 제외
+      if (key.year === currentWeek.year && key.week === currentWeek.week) continue;
 
       const k = `${key.year}-${key.week}`;
       const cur = byWeek.get(k);
