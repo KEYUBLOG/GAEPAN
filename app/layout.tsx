@@ -14,15 +14,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "개판 - 개인들의 판결소",
+  title: "개판 AI - 개인들의 판결소",
   description:
     "당신의 억울한 사연, AI 대법관과 배심원들이 판결해드립니다. 지금 바로 소장을 접수하세요.",
   openGraph: {
-    title: "개판 - 개인들의 판결소",
+    title: "개판 AI - 개인들의 판결소",
     description:
       "당신의 억울한 사연, AI 대법관과 배심원들이 판결해드립니다. 지금 바로 소장을 접수하세요.",
     url: "https://gaepanai.com",
-    siteName: "개판 - 개인들의 판결소",
+    siteName: "개판 AI - 개인들의 판결소",
     images: [
       {
         url: "https://gaepanai.com/og-image.png",
@@ -35,7 +35,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "개판 - 개인들의 판결소",
+    title: "개판 AI - 개인들의 판결소",
     description:
       "당신의 억울한 사연, AI 대법관과 배심원들이 판결해드립니다. 지금 바로 소장을 접수하세요.",
     images: ["https://gaepanai.com/og-image.png"],
