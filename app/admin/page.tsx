@@ -4,6 +4,17 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
+/** 빈 응답/잘못된 JSON으로 인한 JSON.parse 오류 방지 */
+async function safeJsonFromResponse<T = object>(r: Response): Promise<T> {
+  const text = await r.text();
+  if (!text || !text.trim()) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return {} as T;
+  }
+}
+
 export default function AdminPage() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -40,8 +51,8 @@ export default function AdminPage() {
   useEffect(() => {
     // 세션 확인
     fetch("/api/admin/check")
-      .then((r) => r.json())
-      .then((data: { loggedIn?: boolean }) => {
+      .then((r) => safeJsonFromResponse<{ loggedIn?: boolean }>(r))
+      .then((data) => {
         setIsLoggedIn(data.loggedIn === true);
         setChecking(false);
       })
@@ -62,13 +73,13 @@ export default function AdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: password.trim() }),
       });
-      const data = (await r.json()) as { success?: boolean; error?: string };
+      const data = await safeJsonFromResponse<{ success?: boolean; error?: string }>(r);
       if (!r.ok || !data.success) {
         throw new Error(data.error ?? "로그인 실패");
       }
       // 로그인 성공 후 세션 확인
       const checkRes = await fetch("/api/admin/check");
-      const checkData = (await checkRes.json()) as { loggedIn?: boolean };
+      const checkData = await safeJsonFromResponse<{ loggedIn?: boolean }>(checkRes);
       setIsLoggedIn(checkData.loggedIn === true);
       setPassword("");
     } catch (err) {
@@ -102,7 +113,7 @@ export default function AdminPage() {
     setReportsLoading(true);
     try {
       const r = await fetch("/api/admin/reports");
-      const data = (await r.json()) as { reports?: typeof reports; error?: string };
+      const data = await safeJsonFromResponse<{ reports?: typeof reports; error?: string }>(r);
       if (r.ok && data.reports) {
         setReports(data.reports);
         setIsReportsOpen(true);
@@ -121,10 +132,10 @@ export default function AdminPage() {
     setBlockedLoading(true);
     try {
       const r = await fetch("/api/admin/blocked");
-      const data = (await r.json()) as {
+      const data = await safeJsonFromResponse<{
         blocked?: typeof blockedUsers;
         error?: string;
-      };
+      }>(r);
       if (r.ok && data.blocked) {
         setBlockedUsers(data.blocked);
         setIsBlockedOpen(true);

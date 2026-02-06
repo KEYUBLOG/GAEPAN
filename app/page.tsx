@@ -10,6 +10,17 @@ import { getSupabaseBrowserClient } from "@/lib/supabase";
 const TRIAL_DURATION_MS = 24 * 60 * 60 * 1000;
 const URGENT_THRESHOLD_MS = 3 * 60 * 60 * 1000;
 
+/** 빈 응답/잘못된 JSON으로 인한 JSON.parse 오류 방지 */
+async function safeJsonFromResponse<T = object>(r: Response): Promise<T> {
+  const text = await r.text();
+  if (!text || !text.trim()) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return {} as T;
+  }
+}
+
 function getVotingEndsAt(createdAt: string | null): number {
   if (!createdAt) return 0;
   return new Date(createdAt).getTime() + TRIAL_DURATION_MS;
@@ -493,8 +504,8 @@ function HomeContent() {
   // 운영자 로그인 상태 확인
   useEffect(() => {
     fetch("/api/admin/check")
-      .then((r) => r.json())
-      .then((data: { loggedIn?: boolean }) => {
+      .then((r) => safeJsonFromResponse<{ loggedIn?: boolean }>(r))
+      .then((data) => {
         setIsOperatorLoggedIn(data.loggedIn === true);
       })
       .catch(() => setIsOperatorLoggedIn(false));
@@ -880,8 +891,8 @@ function HomeContent() {
     setCommentsError(null);
     setReplyToId(null);
     fetch(`/api/posts/${selectedPost.id}/comments`)
-      .then((r) => r.json())
-      .then((data: { comments?: Comment[]; likedCommentIds?: string[]; error?: string }) => {
+      .then((r) => safeJsonFromResponse<{ comments?: Comment[]; likedCommentIds?: string[]; error?: string }>(r))
+      .then((data) => {
         if (cancelled) return;
         if (data.error) throw new Error(data.error);
         const list = Array.isArray(data.comments) ? data.comments : [];
@@ -1116,12 +1127,12 @@ function HomeContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type }),
       });
-      const data = (await r.json()) as {
+      const data = await safeJsonFromResponse<{
         guilty?: number;
         not_guilty?: number;
         currentVote?: "guilty" | "not_guilty" | null;
         error?: string;
-      };
+      }>(r);
       if (!r.ok) throw new Error(data.error);
       const newGuilty = data.guilty ?? 0;
       const newNotGuilty = data.not_guilty ?? 0;
@@ -1451,8 +1462,8 @@ function HomeContent() {
     }
     let cancelled = false;
     fetch(`/api/posts/${postId}/comments`)
-      .then((r) => r.json())
-      .then((data: { comments?: Array<{ author_id?: string | null }>; error?: string }) => {
+      .then((r) => safeJsonFromResponse<{ comments?: Array<{ author_id?: string | null }>; error?: string }>(r))
+      .then((data) => {
         if (cancelled) return;
         const list = Array.isArray(data.comments) ? data.comments : [];
         const uniqueAuthors = new Set(list.map((c) => c.author_id ?? "anonymous"));
