@@ -23,6 +23,21 @@ function getIp(request: Request): string {
   );
 }
 
+async function isBlockedIp(ip: string) {
+  if (!ip || ip === "unknown") return false;
+  const supabase = createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("blocked_ips")
+    .select("id")
+    .eq("ip_address", ip)
+    .maybeSingle();
+  if (error) {
+    console.error("[GAEPAN] blocked_ips check error (comments):", error);
+    return false;
+  }
+  return !!data;
+}
+
 /** GET: 해당 기소장(post)의 배심원 한마디 목록 + 현재 IP 기준 발도장한 댓글 ID 목록 */
 export async function GET(
   request: Request,
@@ -52,7 +67,22 @@ export async function GET(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const comments = (data ?? []) as Array<{ id: string; content?: string; created_at?: string; parent_id?: string | null; is_hidden?: boolean; author_id?: string | null; ip_address?: string | null; is_operator?: boolean }>;
+    const commentsRaw = (data ?? []) as Array<{ id: string; content?: string; created_at?: string; parent_id?: string | null; is_hidden?: boolean; author_id?: string | null; ip_address?: string | null; is_operator?: boolean }>;
+
+    // 차단된 IP 목록 조회 후 해당 IP가 작성한 댓글은 숨김 처리
+    const { data: blockedRows } = await supabase
+      .from("blocked_ips")
+      .select("ip_address");
+    const blockedSet = new Set(
+      (blockedRows ?? [])
+        .map((r) => (r as { ip_address?: string | null }).ip_address)
+        .filter((ip): ip is string => typeof ip === "string" && ip.length > 0),
+    );
+
+    const comments = commentsRaw.filter(
+      (c) => !c.ip_address || !blockedSet.has(String(c.ip_address)),
+    );
+
     const commentIds = comments.map((c) => c.id).filter(Boolean);
 
     // comment_likes에서 댓글별 좋아요 수 계산 (comments.likes 컬럼 미사용)
@@ -121,6 +151,13 @@ export async function POST(
 
     const parentId = typeof body?.parent_id === "string" && body.parent_id.trim() ? body.parent_id.trim() : null;
     const ip = getIp(request);
+
+    if (await isBlockedIp(ip)) {
+      return NextResponse.json(
+        { error: "차단된 사용자입니다. 댓글을 작성할 수 없습니다." },
+        { status: 403 },
+      );
+    }
     const passwordHash = hashPassword(rawPassword);
 
     // 운영자 세션 확인
@@ -161,4 +198,3 @@ export async function POST(
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
-

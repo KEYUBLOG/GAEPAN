@@ -15,6 +15,21 @@ function getIp(request: Request): string {
   );
 }
 
+async function isBlockedIp(ip: string) {
+  if (!ip || ip === "unknown") return false;
+  const supabase = createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("blocked_ips")
+    .select("id")
+    .eq("ip_address", ip)
+    .maybeSingle();
+  if (error) {
+    console.error("[GAEPAN] blocked_ips check error (comment like):", error);
+    return false;
+  }
+  return !!data;
+}
+
 /**
  * POST: 댓글 발도장 토글 (Upsert 방식)
  * - comment_likes 테이블: (comment_id, ip_address) 기준
@@ -36,6 +51,14 @@ export async function POST(
     }
 
     const ip = getIp(_request);
+
+    if (await isBlockedIp(ip)) {
+      return NextResponse.json(
+        { error: "차단된 사용자입니다. 댓글에 발도장을 남길 수 없습니다." },
+        { status: 403 },
+      );
+    }
+
     const supabase = createSupabaseServerClient();
 
     // 1) 댓글 존재 여부만 확인 (comments 테이블)

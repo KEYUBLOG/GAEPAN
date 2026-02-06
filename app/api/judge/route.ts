@@ -19,7 +19,25 @@ function getIp(request: Request): string {
   );
 }
 
-const CATEGORIES = ["연애", "직장생활", "가족", "친구", "이웃/매너", "사회이슈", "기타"] as const;
+async function isBlockedIp(ip: string): Promise<boolean> {
+  if (!ip || ip === "unknown") return false;
+
+  const supabase = createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("blocked_ips")
+    .select("id")
+    .eq("ip_address", ip)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[GAEPAN] blocked_ips check error:", error);
+    return false;
+  }
+
+  return !!data;
+}
+
+const CATEGORIES = ["연애", "직장생활", "가족", "결혼생활", "육아", "친구", "이웃/매너", "사회이슈", "기타"] as const;
 
 type JudgeRequest = {
   title: string;
@@ -299,6 +317,14 @@ export async function POST(request: Request) {
     const passwordHash = hashPassword(rawPassword);
 
     const ip = getIp(request);
+
+    if (await isBlockedIp(ip)) {
+      return NextResponse.json(
+        { ok: false, error: "차단된 사용자입니다. 더 이상 판결문을 작성할 수 없습니다." },
+        { status: 403 },
+      );
+    }
+
     const supabase = createSupabaseServerClient();
     const hasGemini = !!process.env.GEMINI_API_KEY;
 
@@ -350,24 +376,28 @@ export async function POST(request: Request) {
       verdict_rationalePreview: rationaleToSave?.slice(0, 80) ?? null,
     });
 
-    const { error } = await supabase.from("posts").insert({
-      title: verdict.title,
-      content: req.details,
-      verdict: verdict.verdict,
-      verdict_rationale: rationaleToSave,
-      ratio: Number(verdict.ratio.defendant),
-      plaintiff: req.plaintiff,
-      defendant: req.defendant,
-      status: "판결완료",
-      guilty: 0,
-      not_guilty: 0,
-      image_url: req.image_url ?? null,
-      ip_address: ip,
-      case_number: nextCaseNumber,
-      delete_password: passwordHash,
-      category,
-      trial_type: req.trial_type,
-    });
+    const { data: inserted, error } = await supabase
+      .from("posts")
+      .insert({
+        title: verdict.title,
+        content: req.details,
+        verdict: verdict.verdict,
+        verdict_rationale: rationaleToSave,
+        ratio: Number(verdict.ratio.defendant),
+        plaintiff: req.plaintiff,
+        defendant: req.defendant,
+        status: "판결완료",
+        guilty: 0,
+        not_guilty: 0,
+        image_url: req.image_url ?? null,
+        ip_address: ip,
+        case_number: nextCaseNumber,
+        delete_password: passwordHash,
+        category,
+        trial_type: req.trial_type,
+      })
+      .select("id")
+      .single();
 
     if (error) {
       console.error("[GAEPAN] DB_INSERT_ERROR:", error);
@@ -382,13 +412,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
 
-    console.log("[GAEPAN][POST /api/judge] insert success");
+    console.log("[GAEPAN][POST /api/judge] insert success", {
+      postId: inserted?.id ?? null,
+    });
 
-    return NextResponse.json({ ok: true, mock: !hasGemini, verdict });
+    return NextResponse.json({
+      ok: true,
+      mock: !hasGemini,
+      verdict,
+      post_id: inserted?.id ?? null,
+    });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";
     console.error("[GAEPAN][POST /api/judge] unhandled error", e);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
-

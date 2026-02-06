@@ -12,6 +12,7 @@ export default function AdminPage() {
   const [checking, setChecking] = useState(true);
   const [isMobilePreviewOpen, setIsMobilePreviewOpen] = useState(false);
   const [isReportsOpen, setIsReportsOpen] = useState(false);
+  const [isBlockedOpen, setIsBlockedOpen] = useState(false);
   const [reports, setReports] = useState<Array<{
     id: string;
     target_type: "post" | "comment";
@@ -28,26 +29,13 @@ export default function AdminPage() {
     post_title?: string | null;
   }>>([]);
   const [reportsLoading, setReportsLoading] = useState(false);
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [blockedLoading, setBlockedLoading] = useState(false);
+  const [blockedUsers, setBlockedUsers] = useState<Array<{
+    ip_address: string;
+    created_at: string;
+    posts: { id: string; title: string | null; created_at: string | null }[];
+  }>>([]);
   const router = useRouter();
-
-  const handleConfirmReport = async (reportId: string) => {
-    setConfirmingId(reportId);
-    try {
-      const r = await fetch(`/api/admin/reports/${reportId}`, { method: "DELETE" });
-      const data = (await r.json()) as { ok?: boolean; error?: string };
-      if (r.ok && data.ok) {
-        setReports((prev) => prev.filter((r) => r.id !== reportId));
-      } else {
-        alert(data.error ?? "확인완료 처리에 실패했습니다.");
-      }
-    } catch (err) {
-      alert("요청 중 오류가 발생했습니다.");
-      console.error(err);
-    } finally {
-      setConfirmingId(null);
-    }
-  };
 
   useEffect(() => {
     // 세션 확인
@@ -100,7 +88,7 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
-    if (isMobilePreviewOpen || isReportsOpen) {
+    if (isMobilePreviewOpen || isReportsOpen || isBlockedOpen) {
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
@@ -108,7 +96,7 @@ export default function AdminPage() {
     return () => {
       document.body.style.overflow = "";
     };
-  }, [isMobilePreviewOpen, isReportsOpen]);
+  }, [isMobilePreviewOpen, isReportsOpen, isBlockedOpen]);
 
   const loadReports = async () => {
     setReportsLoading(true);
@@ -126,6 +114,48 @@ export default function AdminPage() {
       console.error(err);
     } finally {
       setReportsLoading(false);
+    }
+  };
+
+  const loadBlockedUsers = async () => {
+    setBlockedLoading(true);
+    try {
+      const r = await fetch("/api/admin/blocked");
+      const data = (await r.json()) as {
+        blocked?: typeof blockedUsers;
+        error?: string;
+      };
+      if (r.ok && data.blocked) {
+        setBlockedUsers(data.blocked);
+        setIsBlockedOpen(true);
+      } else {
+        alert(data.error ?? "차단된 사용자 목록을 불러오지 못했습니다.");
+      }
+    } catch (err) {
+      console.error("차단된 사용자 목록 조회 실패:", err);
+      alert("차단된 사용자 목록을 불러오는 중 오류가 발생했습니다.");
+    } finally {
+      setBlockedLoading(false);
+    }
+  };
+
+  const unblockUser = async (ip: string) => {
+    if (!confirm(`IP ${ip} 사용자를 차단 해제하시겠습니까?`)) return;
+    try {
+      const r = await fetch("/api/admin/blocked", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ip_address: ip }),
+      });
+      const data = (await r.json().catch(() => null)) as { success?: boolean; error?: string } | null;
+      if (!r.ok || !data?.success) {
+        alert(data?.error ?? "차단 해제에 실패했습니다.");
+        return;
+      }
+      setBlockedUsers((prev) => prev.filter((b) => b.ip_address !== ip));
+    } catch (err) {
+      console.error("차단 해제 실패:", err);
+      alert("차단 해제 중 오류가 발생했습니다.");
     }
   };
 
@@ -224,6 +254,17 @@ export default function AdminPage() {
             <p className="text-xs text-zinc-500 mt-2">
               신고된 게시글과 댓글을 확인할 수 있습니다.
             </p>
+            <button
+              onClick={loadBlockedUsers}
+              disabled={blockedLoading}
+              className="w-full rounded-xl border border-amber-500/50 bg-amber-500/15 px-6 py-3 text-sm font-bold text-amber-400 hover:bg-amber-500/30 transition flex items-center justify-center gap-2 disabled:opacity-50 mt-4"
+            >
+              <span>🚫</span>
+              <span>{blockedLoading ? "불러오는 중..." : "차단된 사용자 확인하기"}</span>
+            </button>
+            <p className="text-xs text-zinc-500 mt-2">
+              차단된 사용자의 IP와 작성한 글을 확인하고 차단을 해제할 수 있습니다.
+            </p>
           </div>
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-6 space-y-4">
             <h2 className="text-lg font-bold text-zinc-200 mb-4">개발 도구</h2>
@@ -277,8 +318,8 @@ export default function AdminPage() {
                       key={report.id}
                       className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3"
                     >
-                      <div className="flex items-center justify-between flex-wrap gap-2">
-                        <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
                           <span
                             className={`px-2 py-1 rounded text-xs font-bold ${
                               report.target_type === "post"
@@ -292,19 +333,9 @@ export default function AdminPage() {
                             <span className="text-xs text-zinc-400">사유: {report.reason}</span>
                           )}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-zinc-500">
-                            {new Date(report.created_at).toLocaleString("ko-KR")}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleConfirmReport(report.id)}
-                            disabled={confirmingId === report.id}
-                            className="rounded-lg border border-amber-500/50 bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-400 hover:bg-amber-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {confirmingId === report.id ? "처리 중..." : "확인완료"}
-                          </button>
-                        </div>
+                        <span className="text-xs text-zinc-500">
+                          {new Date(report.created_at).toLocaleString("ko-KR")}
+                        </span>
                       </div>
                       {report.target ? (
                         <div className="space-y-2">
@@ -316,13 +347,14 @@ export default function AdminPage() {
                               <div className="text-xs text-zinc-400 line-clamp-3">
                                 {report.target.content || "(내용 없음)"}
                               </div>
-                              <Link
+                              <a
                                 href={`/?post=${report.target_id}`}
-                                onClick={() => setIsReportsOpen(false)}
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 className="inline-block text-xs text-amber-400 hover:text-amber-300 transition"
                               >
                                 게시글 보기 →
-                              </Link>
+                              </a>
                             </>
                           ) : (
                             <>
@@ -333,13 +365,14 @@ export default function AdminPage() {
                                 {report.target?.content || "(내용 없음)"}
                               </div>
                               {report.target && "post_id" in report.target && report.target.post_id && (
-                                <Link
-                                  href={`/?post=${(report.target as { post_id?: string }).post_id}`}
-                                  onClick={() => setIsReportsOpen(false)}
+                                <a
+                                  href={`/?post=${report.target.post_id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
                                   className="inline-block text-xs text-amber-400 hover:text-amber-300 transition"
                                 >
                                   게시글 보기 →
-                                </Link>
+                                </a>
                               )}
                             </>
                           )}
@@ -356,21 +389,109 @@ export default function AdminPage() {
         </div>
       ) : null}
 
+      {/* 차단된 사용자 모달 */}
+      {isBlockedOpen ? (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 p-4">
+          <div className="relative w-full max-w-4xl max-h-[90vh] bg-zinc-950 rounded-2xl border border-zinc-800 shadow-2xl flex flex-col">
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-black text-amber-400 mb-1">🚫 차단된 사용자</h2>
+                <p className="text-sm text-zinc-500">
+                  총 {blockedUsers.length}개의 IP가 차단되어 있습니다.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsBlockedOpen(false)}
+                className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm font-black text-zinc-200 hover:bg-zinc-800 transition"
+              >
+                닫기
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              {blockedUsers.length === 0 ? (
+                <div className="text-center py-12 text-zinc-500 text-sm">
+                  차단된 사용자가 없습니다.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {blockedUsers.map((b) => (
+                    <div
+                      key={b.ip_address}
+                      className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3"
+                    >
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <div className="text-sm font-bold text-amber-300">
+                            IP: <span className="font-mono">{b.ip_address}</span>
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            차단 시각:{" "}
+                            {new Date(b.created_at).toLocaleString("ko-KR")}
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            작성한 글: {b.posts.length}건 (최근 5개 기준)
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => unblockUser(b.ip_address)}
+                          className="shrink-0 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-xs font-bold text-zinc-200 hover:bg-zinc-800 transition"
+                        >
+                          차단 해제
+                        </button>
+                      </div>
+                      {b.posts.length > 0 ? (
+                        <div className="mt-3 space-y-2">
+                          {b.posts.map((p) => (
+                            <div key={p.id} className="flex items-center justify-between gap-2 text-xs">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-zinc-200 truncate">
+                                  {p.title || "(제목 없음)"}
+                                </div>
+                                <div className="text-[11px] text-zinc-500">
+                                  {p.created_at
+                                    ? new Date(p.created_at).toLocaleString("ko-KR")
+                                    : ""}
+                                </div>
+                              </div>
+                              <a
+                                href={`/?post=${p.id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="shrink-0 text-[11px] text-amber-400 hover:text-amber-300"
+                              >
+                                글 보기 →
+                              </a>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* 모바일 미리보기 모달 */}
       {isMobilePreviewOpen ? (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 p-4">
           <div className="relative w-full max-w-[400px] flex flex-col items-center">
             {/* 모바일 프레임 */}
-            <div className="relative w-full max-w-[375px] aspect-[375/812] bg-zinc-900 rounded-[3rem] p-2 shadow-2xl border-8 border-zinc-800 overflow-hidden">
+            <div className="relative w-[375px] h-[812px] bg-zinc-900 rounded-[3rem] p-2 shadow-2xl border-8 border-zinc-800 overflow-hidden">
               {/* 상단 노치 시뮬레이션 */}
               <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[150px] h-[30px] bg-black rounded-b-3xl z-10 pointer-events-none"></div>
               
               {/* iframe */}
               <div className="w-full h-full rounded-[2.5rem] border-0 bg-white overflow-hidden">
                 <iframe
-                  src="/"
+                  src="/?mobile_preview=true"
                   className="w-full h-full border-0"
                   style={{
+                    width: "100%",
+                    height: "100%",
                     pointerEvents: "auto",
                   }}
                   title="모바일 미리보기"

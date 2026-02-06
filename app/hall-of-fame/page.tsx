@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
+import { Logo } from "@/app/components/Logo";
 import { Noto_Serif_KR } from "next/font/google";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -39,6 +40,7 @@ function isVotingOpen(createdAt: string | null, votingEndedAt?: string | null): 
   return Date.now() < new Date(createdAt).getTime() + TRIAL_DURATION_MS;
 }
 
+// created_at 기준 기본 투표 종료 주차
 function getVotingEndWeek(createdAt: string | null): { year: number; week: number } | null {
   if (!createdAt) return null;
   const endMs = new Date(createdAt).getTime() + TRIAL_DURATION_MS;
@@ -47,6 +49,30 @@ function getVotingEndWeek(createdAt: string | null): { year: number; week: numbe
   const days = Math.floor((endMs - start.getTime()) / 86400000);
   const week = Math.ceil((days + d.getDay() + 1) / 7);
   return { year: d.getFullYear(), week: Math.min(week, 53) };
+}
+
+// voting_ended_at 이 있으면 실제 종료 시각 기준 주차, 없으면 created_at+24h 기준
+function getWeekFromEndAt(
+  endedAt: string | null,
+  createdAt: string | null,
+): { year: number; week: number } | null {
+  if (endedAt) {
+    const d = new Date(endedAt);
+    const start = new Date(d.getFullYear(), 0, 1);
+    const days = Math.floor((d.getTime() - start.getTime()) / 86400000);
+    const week = Math.ceil((days + start.getDay() + 1) / 7);
+    return { year: d.getFullYear(), week: Math.min(week, 53) };
+  }
+  return getVotingEndWeek(createdAt);
+}
+
+// 현재 주차 (명예의 전당에서 \"이번 주\"는 제외하기 위함)
+function getCurrentWeek(): { year: number; week: number } {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 1);
+  const days = Math.floor((now.getTime() - start.getTime()) / 86400000);
+  const week = Math.ceil((days + start.getDay() + 1) / 7);
+  return { year: now.getFullYear(), week: Math.min(week, 53) };
 }
 
 function toRatioNumber(value: unknown): number | null {
@@ -124,6 +150,7 @@ export default function HallOfFamePage() {
   const [editPostId, setEditPostId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
+  const [editCategory, setEditCategory] = useState("");
   const [editPassword, setEditPassword] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -141,8 +168,9 @@ export default function HallOfFamePage() {
       verdict: string;
     };
   } | null>(null);
+  const [createdPostId, setCreatedPostId] = useState<string | null>(null);
   const [judgeError, setJudgeError] = useState<string | null>(null);
-  const CATEGORY_OPTIONS = ["연애", "직장생활", "가족", "친구", "이웃/매너", "사회이슈", "기타"] as const;
+  const CATEGORY_OPTIONS = ["연애", "직장생활", "가족", "결혼생활", "육아", "친구", "이웃/매너", "사회이슈", "기타"] as const;
   const [form, setForm] = useState({
     title: "",
     details: "",
@@ -157,6 +185,26 @@ export default function HallOfFamePage() {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const commentDeletePasswordRef = React.useRef<HTMLInputElement | null>(null);
   const deletePasswordRef = React.useRef<HTMLInputElement | null>(null);
+  const verdictDetailRef = React.useRef<HTMLDivElement | null>(null);
+
+  // 판결문 상세 모달이 열려 있을 때 배경 스크롤 잠금
+  useEffect(() => {
+    if (!selectedPost) return;
+    const scrollY = window.scrollY;
+    document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.top = "";
+      document.body.style.left = "";
+      document.body.style.right = "";
+      window.scrollTo(0, scrollY);
+    };
+  }, [selectedPost]);
 
   // 게시글 로드
   useEffect(() => {
@@ -165,14 +213,23 @@ export default function HallOfFamePage() {
       setError(null);
       try {
         const supabase = getSupabaseBrowserClient();
-        const { data, error: listError } = await supabase
-          .from("posts")
-          .select("*, verdict_rationale")
-          .neq("status", "판결불가")
-          .order("created_at", { ascending: false })
-          .limit(100);
+        const [{ data, error: listError }, { data: blockedRows }] = await Promise.all([
+          supabase
+            .from("posts")
+            .select("*, verdict_rationale")
+            .neq("status", "판결불가")
+            .order("created_at", { ascending: false })
+            .limit(100),
+          supabase.from("blocked_ips").select("ip_address"),
+        ]);
 
         if (listError) throw listError;
+
+        const blockedSet = new Set(
+          (blockedRows ?? [])
+            .map((r) => (r as { ip_address?: string | null }).ip_address)
+            .filter((ip): ip is string => typeof ip === "string" && ip.length > 0),
+        );
 
         const toPostPreview = (row: Record<string, unknown>): PostPreview => ({
           id: String(row.id ?? ""),
@@ -198,7 +255,12 @@ export default function HallOfFamePage() {
           voting_ended_at: (row.voting_ended_at as string | null) ?? null,
         });
 
-        const allPosts = (data ?? []).map((row) => toPostPreview(row as Record<string, unknown>));
+        const allPosts = (data ?? [])
+          .filter((row) => {
+            const ip = (row as any).ip_address as string | null | undefined;
+            return !ip || !blockedSet.has(String(ip));
+          })
+          .map((row) => toPostPreview(row as Record<string, unknown>));
         setPosts(allPosts);
       } catch (err) {
         setError(err instanceof Error ? err.message : "명예의 전당 목록을 불러오지 못했습니다.");
@@ -434,12 +496,13 @@ export default function HallOfFamePage() {
     setEditPostId(null);
     setEditTitle("");
     setEditContent("");
+    setEditCategory("");
     setEditPassword("");
     setEditError(null);
     setEditSubmitting(false);
   };
 
-  const handleEditPost = async (postId: string, payload: { password: string; title: string; content: string }) => {
+  const handleEditPost = async (postId: string, payload: { password: string; title: string; content: string; category?: string | null }) => {
     if (!postId?.trim() || !payload.password.trim()) return;
     setEditSubmitting(true);
     setEditError(null);
@@ -451,6 +514,7 @@ export default function HallOfFamePage() {
           password: payload.password.trim(),
           title: payload.title.trim(),
           content: payload.content,
+          category: payload.category === "" ? null : payload.category ?? undefined,
         }),
       });
       const data = (await r.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
@@ -459,9 +523,11 @@ export default function HallOfFamePage() {
         setEditSubmitting(false);
         return;
       }
-      const { title, content } = { title: payload.title.trim(), content: payload.content };
-      setSelectedPost((prev) => (prev?.id === postId ? { ...prev, title, content } : prev));
-      setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, title, content } : p)));
+      const title = payload.title.trim();
+      const content = payload.content;
+      const category = payload.category === "" ? null : (payload.category ?? null);
+      setSelectedPost((prev) => (prev?.id === postId ? { ...prev, title, content, category } : prev));
+      setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, title, content, category } : p)));
       closeEditModal();
       setPostMenuOpenId(null);
       window.alert("판결문이 수정되었습니다.");
@@ -519,14 +585,29 @@ export default function HallOfFamePage() {
   // 주차별 명예의 전당 계산
   const weeklyWinners = useMemo(() => {
     const ended = posts.filter((p) => !isVotingOpen(p.created_at, p.voting_ended_at) && p.guilty > 0);
+    const now = new Date();
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+
     const byWeek = new Map<string, { year: number; week: number; post: typeof ended[0] }>();
+
     for (const p of ended) {
-      const key = getVotingEndWeek(p.created_at);
+      const key = getWeekFromEndAt(p.voting_ended_at, p.created_at);
       if (!key) continue;
+
+      // 이 글의 \"투표 종료 시각\"이 오늘 이후라면 (오늘 포함) → 아직 진행 중인 주로 보고 스킵
+      const endedTime = (() => {
+        if (p.voting_ended_at) return new Date(p.voting_ended_at).getTime();
+        const created = p.created_at ? new Date(p.created_at).getTime() : 0;
+        return created + TRIAL_DURATION_MS;
+      })();
+      if (endedTime >= startOfToday.getTime()) continue;
+
       const k = `${key.year}-${key.week}`;
       const cur = byWeek.get(k);
       if (!cur || p.guilty > cur.post.guilty) byWeek.set(k, { ...key, post: p });
     }
+
     return Array.from(byWeek.values()).sort((a, b) => b.year - a.year || b.week - a.week);
   }, [posts]);
 
@@ -534,6 +615,7 @@ export default function HallOfFamePage() {
     setIsReviewing(false);
     setIsAccuseOpen(false);
     setJudgeError(null);
+    setCreatedPostId(null);
     setImageFile(null);
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     setImagePreviewUrl(null);
@@ -547,6 +629,7 @@ export default function HallOfFamePage() {
     setJudgeResult(null);
     setJudgeError(null);
     setUploadError(null);
+    setCreatedPostId(null);
   };
 
   const canSubmit = React.useMemo(() => {
@@ -633,8 +716,17 @@ export default function HallOfFamePage() {
       });
 
       type JudgeApiResponse =
-        | { ok: true; mock?: boolean; verdict: { title: string; ratio: { plaintiff: number; defendant: number; rationale: string }; verdict: string } }
-        | { ok: true; status: "판결불가"; verdict: null }
+        | {
+            ok: true;
+            mock?: boolean;
+            verdict: {
+              title: string;
+              ratio: { plaintiff: number; defendant: number; rationale: string };
+              verdict: string;
+            };
+            post_id?: string | null;
+          }
+        | { ok: true; status: "판결불가"; verdict: null; post_id?: string | null }
         | { ok: false; error?: string };
 
       let data: JudgeApiResponse | null = null;
@@ -656,6 +748,9 @@ export default function HallOfFamePage() {
       }
 
       setJudgeResult({ mock: (data as any).mock ?? false, verdict: (data as any).verdict });
+      const pid =
+        (data && "post_id" in data && (data as any).post_id) ? String((data as any).post_id) : null;
+      setCreatedPostId(pid);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "알 수 없는 오류";
       setJudgeError(msg);
@@ -668,9 +763,7 @@ export default function HallOfFamePage() {
     <div className={`min-h-screen bg-black overflow-x-hidden ${notoSerif.className}`}>
       {/* 네비게이션 */}
       <nav className="px-4 py-3 md:px-6 md:py-4 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50 font-sans">
-        <Link href="/" className="shrink-0 text-2xl font-black tracking-tighter text-amber-500 italic">
-          GAEPAN
-        </Link>
+        <Logo />
         <div className="flex items-center">
           <button
             type="button"
@@ -688,7 +781,7 @@ export default function HallOfFamePage() {
             명예의 전당
           </h1>
           <p className="text-amber-400/80 text-sm md:text-base font-medium">
-            매주 &apos;금주의 개판&apos; 1위로 선정된 공식 판결 기록입니다.
+            매주 &apos;오늘의 개판&apos; 1위로 선정된 공식 판결 기록입니다.
           </p>
         </div>
 
@@ -707,40 +800,211 @@ export default function HallOfFamePage() {
             아직 기록된 주차가 없습니다.
           </div>
         ) : (
-          <div className="rounded-[2rem] border border-amber-500/20 bg-zinc-950/50 p-6 md:p-8">
-            <ul className="space-y-5">
-              {weeklyWinners.map(({ year, week, post }) => (
-                <li key={`${year}-${week}`}>
+          <div className="grid md:grid-cols-2 gap-4 md:gap-6 mt-6 overflow-x-hidden break-all">
+            {weeklyWinners.map(({ year, week, post: p }) => {
+              const total = p.guilty + p.not_guilty;
+              const guiltyPct = total ? Math.round((p.guilty / total) * 100) : 0;
+              const notGuiltyPct = total ? Math.round((p.not_guilty / total) * 100) : 0;
+              return (
+                <article
+                  key={`${year}-${week}-${p.id}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedPost(p)}
+                  onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
+                  className="group relative w-full max-w-[calc(100vw-2rem)] mx-auto rounded-[1.75rem] border border-zinc-700/80 bg-zinc-950/60 p-4 md:p-6 hover:border-zinc-600/80 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all opacity-90 saturate-[0.85] hover:opacity-95 hover:saturate-100"
+                  style={{
+                    backgroundImage: "repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(255,255,255,0.02) 6px, rgba(255,255,255,0.02) 12px)",
+                  }}
+                >
+                  {/* [판결 완료] 도장 스탬프 */}
                   <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setSelectedPost(post)}
-                    onKeyDown={(e) => e.key === "Enter" && setSelectedPost(post)}
-                    className="relative block rounded-2xl border border-amber-500/30 bg-zinc-900 p-5 md:p-6 transition-all cursor-pointer hover:shadow-[0_0_20px_rgba(251,191,36,0.2)]"
+                    className="absolute top-4 right-4 md:top-5 md:right-5 z-10 pointer-events-none select-none"
+                    style={{ transform: "rotate(12deg)" }}
                   >
-                    <div className="absolute top-4 right-4 text-amber-500/90">
-                      <SealIcon className="w-8 h-8 md:w-9 md:h-9" />
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 pr-10">
-                      <span className="text-amber-500 font-bold">
+                    <span className="inline-block px-2 py-1 md:px-2.5 md:py-1.5 border-2 border-red-600/90 text-red-500/95 text-[10px] md:text-xs font-black tracking-widest rounded shadow-md bg-black/20">
+                      [ 판 결 완 료 ]
+                    </span>
+                  </div>
+
+                  {/* 상단: 카테고리·주차(좌) + 사건번호·메뉴(우측) */}
+                  <div className="flex items-center justify-between mb-2 text-[11px] text-zinc-500">
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                      {p.category ? (
+                        <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-800/80 border border-zinc-700 text-zinc-500">
+                          {p.category}
+                        </span>
+                      ) : null}
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-amber-500/40 bg-amber-500/10 text-amber-500/90">
                         {year}년 제{week}주
                       </span>
-                      <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-amber-400/90">
-                        🏛️ 공식 판결 기록
-                      </span>
                     </div>
-                    <p className="font-bold text-zinc-100 mt-3 line-clamp-1 text-base md:text-lg">
-                      {post.title}
-                    </p>
-                    <p className="text-xs tracking-widest text-zinc-500 mt-2 uppercase">
-                      {post.trial_type === "DEFENSE"
-                        ? `무죄 ${post.not_guilty}표 · 유죄 ${post.guilty}표`
-                        : `유죄 ${post.guilty}표 · 무죄 ${post.not_guilty}표`}
-                    </p>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <div className="relative" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPostMenuOpenId((prev) => (prev === p.id ? null : p.id));
+                          }}
+                          className="p-0.5 text-zinc-500 hover:text-zinc-300"
+                          aria-label="메뉴"
+                        >
+                          ⋯
+                        </button>
+                        {postMenuOpenId === p.id ? (
+                          <div className="absolute right-0 mt-1 w-40 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); sharePost(p.id, p.title); }}
+                              className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
+                            >
+                              공유하기
+                            </button>
+                            {isOperatorLoggedIn ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (!confirm("이 작성자를 차단하시겠습니까? (해당 IP는 글/댓글 작성, 투표, 발도장이 제한됩니다)")) return;
+                                    try {
+                                      const r = await fetch("/api/admin/block", {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ targetType: "post", id: p.id }),
+                                      });
+                                      if (!r.ok) {
+                                        const data = await r.json().catch(() => null);
+                                        alert(data?.error || "차단에 실패했습니다.");
+                                      } else {
+                                        alert("작성자가 차단되었습니다.");
+                                      }
+                                    } catch (err) {
+                                      console.error("작성자 차단 실패:", err);
+                                      alert("차단 중 오류가 발생했습니다.");
+                                    } finally {
+                                      setPostMenuOpenId(null);
+                                    }
+                                  }}
+                                  className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
+                                >
+                                  👮 작성자 차단
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (!confirm("이 글을 삭제하시겠습니까?")) return;
+                                    try {
+                                      const r = await fetch(`/api/admin/delete?type=post&id=${p.id}`, { method: "DELETE" });
+                                      if (r.ok) { setPosts((prev) => prev.filter((x) => x.id !== p.id)); window.location.reload(); }
+                                    } catch (err) { console.error("삭제 실패:", err); }
+                                    finally { setPostMenuOpenId(null); }
+                                  }}
+                                  className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
+                                >
+                                  ⚖️ 삭제
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setDeletePostId(p.id); setPostMenuOpenId(null); }}
+                                  className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
+                                >
+                                  판결문 삭제
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); openReportModal("post", p.id); setPostMenuOpenId(null); }}
+                                  className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
+                                >
+                                  신고하기
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
-                </li>
-              ))}
-            </ul>
+
+                  {/* 제목 + 내용 요약 */}
+                  <div className="mb-2 pr-16">
+                    <h4 className="text-base md:text-lg font-bold text-zinc-300 group-hover:text-amber-400/90 transition line-clamp-1 text-left break-all">
+                      {p.title}
+                    </h4>
+                    {p.content ? (
+                      <p className="text-[11px] text-zinc-500 line-clamp-2 text-left break-all">
+                        {p.content}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  {/* 원고·피고 */}
+                  <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2">
+                    {p.plaintiff === "익명" && p.defendant === "익명" ? (
+                      <span>익명</span>
+                    ) : (
+                      <>
+                        {p.plaintiff ? <span>원고 {p.plaintiff}</span> : null}
+                        {p.plaintiff && p.defendant ? <span>·</span> : null}
+                        {p.defendant ? <span>피고 {p.defendant}</span> : null}
+                      </>
+                    )}
+                  </div>
+
+                  {/* 최종 스코어 보드 — 하단 전체 폭 바 + AI 대법관 확정 라벨 */}
+                  <div className="mt-auto space-y-2">
+                    <div className="w-full h-3 md:h-4 bg-zinc-800 rounded-full overflow-hidden flex">
+                      {guiltyPct > 0 ? (
+                        <div
+                          className="bg-red-600/90 h-full min-w-0 flex items-center justify-end pr-1 shrink-0"
+                          style={{ width: `${guiltyPct}%` }}
+                        >
+                          {guiltyPct >= 50 ? (
+                            <span className="text-[9px] md:text-[10px] font-bold text-red-200/90 whitespace-nowrap">AI 대법관 최종 확정</span>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {notGuiltyPct > 0 ? (
+                        <div
+                          className="bg-blue-600/90 h-full min-w-0 flex items-center justify-start pl-1 shrink-0"
+                          style={{ width: `${notGuiltyPct}%` }}
+                        >
+                          {notGuiltyPct >= 50 ? (
+                            <span className="text-[9px] md:text-[10px] font-bold text-blue-200/90 whitespace-nowrap">AI 대법관 최종 확정</span>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-zinc-500">
+                      <span className="text-red-400/80">유죄 {guiltyPct}% ({p.guilty}표)</span>
+                      <span className="text-blue-400/80">무죄 {notGuiltyPct}% ({p.not_guilty}표)</span>
+                    </div>
+                  </div>
+
+                  {/* 하단 버튼 */}
+                  <div className="flex flex-col sm:flex-row gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setSelectedPost(p); }}
+                      className="flex-1 rounded-xl border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-4 py-2.5 text-xs md:text-sm font-bold transition"
+                    >
+                      AI 판결문 전문 보기
+                    </button>
+                    <Link
+                      href="/"
+                      className="flex-1 rounded-xl border border-zinc-600 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 px-4 py-2.5 text-xs md:text-sm font-bold transition text-center inline-flex items-center justify-center"
+                    >
+                      나도 사연 올리기
+                    </Link>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
       </div>
@@ -765,13 +1029,20 @@ export default function HallOfFamePage() {
           <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-zinc-800 bg-zinc-950 shadow-[0_0_60px_rgba(0,0,0,0.8)]">
             <div className="sticky top-0 z-10 flex items-center justify-between gap-4 p-6 border-b border-zinc-800 bg-zinc-950">
               <h3 className="text-lg font-black text-amber-500">판결문 상세</h3>
-              <button
-                type="button"
-                onClick={() => setSelectedPost(null)}
-                className="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-800 transition"
-              >
-                닫기
-              </button>
+              <div className="flex items-center gap-2">
+                {selectedPost.case_number != null ? (
+                  <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-zinc-400 whitespace-nowrap leading-none rounded-full border border-zinc-700/80 bg-zinc-900/60">
+                    사건 번호 {selectedPost.case_number}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setSelectedPost(null)}
+                  className="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-800 transition"
+                >
+                  닫기
+                </button>
+              </div>
             </div>
             <div className="p-6 space-y-6">
               {(() => {
@@ -823,9 +1094,6 @@ export default function HallOfFamePage() {
                         </div>
                         <h4 className="text-xl md:text-2xl font-bold text-zinc-100 break-words">{selectedPost.title}</h4>
                       </div>
-                      <span className="text-xs font-black tracking-widest uppercase text-zinc-500 shrink-0">
-                        사건 번호 {selectedPost.case_number != null ? selectedPost.case_number : "—"}
-                      </span>
                     </div>
                     
                     {/* 판결 완료 시 승소/패소 UI */}
@@ -908,7 +1176,7 @@ export default function HallOfFamePage() {
                     ⋯
                   </button>
                   {postMenuOpenId === selectedPost.id ? (
-                    <div className="absolute right-0 mt-1 w-32 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
+                  <div className="absolute right-0 mt-1 w-40 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
                       <button
                         type="button"
                         onClick={() => sharePost(selectedPost.id, selectedPost.title)}
@@ -917,6 +1185,34 @@ export default function HallOfFamePage() {
                         공유하기
                       </button>
                       {isOperatorLoggedIn ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!confirm("이 작성자를 차단하시겠습니까? (해당 IP는 글/댓글 작성, 투표, 발도장이 제한됩니다)")) return;
+                            try {
+                              const r = await fetch("/api/admin/block", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ targetType: "post", id: selectedPost.id }),
+                              });
+                              if (!r.ok) {
+                                const data = await r.json().catch(() => null);
+                                alert(data?.error || "차단에 실패했습니다.");
+                              } else {
+                                alert("작성자가 차단되었습니다.");
+                              }
+                            } catch (err) {
+                              console.error("작성자 차단 실패:", err);
+                              alert("차단 중 오류가 발생했습니다.");
+                            } finally {
+                              setPostMenuOpenId(null);
+                            }
+                          }}
+                          className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
+                        >
+                          👮 작성자 차단
+                        </button>
                         <button
                           type="button"
                           onClick={async () => {
@@ -930,13 +1226,15 @@ export default function HallOfFamePage() {
                               }
                             } catch (err) {
                               console.error("삭제 실패:", err);
+                            } finally {
+                              setPostMenuOpenId(null);
                             }
-                            setPostMenuOpenId(null);
                           }}
                           className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
                         >
                           ⚖️ 삭제
                         </button>
+                      </>
                       ) : (
                         <>
                           <button
@@ -945,6 +1243,7 @@ export default function HallOfFamePage() {
                               setEditPostId(selectedPost.id);
                               setEditTitle(selectedPost.title);
                               setEditContent(selectedPost.content ?? "");
+                              setEditCategory(selectedPost.category ?? "");
                               setEditPassword("");
                               setEditError(null);
                               setPostMenuOpenId(null);
@@ -1553,7 +1852,7 @@ export default function HallOfFamePage() {
           <div className="w-full max-w-lg rounded-2xl bg-zinc-950 border border-zinc-800 p-5 space-y-4 my-8">
             <h4 className="text-sm font-black text-zinc-100">판결문 수정</h4>
             <p className="text-xs text-zinc-400">
-              제목과 내용을 수정한 뒤, 기소 시 설정한 판결문 수정 및 삭제 비밀번호를 입력하세요.
+              제목, 카테고리, 내용을 수정한 뒤, 기소 시 설정한 판결문 수정 및 삭제 비밀번호를 입력하세요.
             </p>
             <div>
               <label className="block text-xs font-bold text-zinc-400 mb-1">제목</label>
@@ -1566,6 +1865,20 @@ export default function HallOfFamePage() {
                 className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-500/60 outline-none disabled:opacity-60"
                 placeholder="제목"
               />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-zinc-400 mb-1">카테고리</label>
+              <select
+                value={editCategory}
+                onChange={(e) => setEditCategory(e.target.value)}
+                disabled={editSubmitting}
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 focus:border-amber-500/60 outline-none disabled:opacity-60"
+              >
+                <option value="">선택 안 함</option>
+                {CATEGORY_OPTIONS.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-bold text-zinc-400 mb-1">내용 (사건 경위)</label>
@@ -1605,7 +1918,7 @@ export default function HallOfFamePage() {
               </button>
               <button
                 type="button"
-                onClick={() => handleEditPost(editPostId, { password: editPassword, title: editTitle, content: editContent })}
+                onClick={() => handleEditPost(editPostId, { password: editPassword, title: editTitle, content: editContent, category: editCategory || null })}
                 disabled={!editTitle.trim() || !editPassword.trim() || editSubmitting}
                 className="rounded-xl bg-amber-500 px-3 py-1.5 text-xs font-bold text-black hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -2007,7 +2320,10 @@ export default function HallOfFamePage() {
               ) : null}
 
               {judgeResult ? (
-                <div className="rounded-[2rem] border border-zinc-800 bg-zinc-950/60 p-5 md:p-6">
+                <div
+                  ref={verdictDetailRef}
+                  className="rounded-[2rem] border border-zinc-800 bg-zinc-950/60 p-5 md:p-6"
+                >
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="inline-flex items-center gap-2 text-xs font-black tracking-widest uppercase">
@@ -2094,13 +2410,34 @@ export default function HallOfFamePage() {
                 >
                   취소
                 </button>
-                <button
-                  type="submit"
-                  disabled={!canSubmit}
-                  className="w-full md:w-auto rounded-2xl bg-amber-500 px-6 py-4 font-black text-black hover:bg-amber-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  판결 요청
-                </button>
+                {judgeResult ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (createdPostId) {
+                        if (typeof window !== "undefined") {
+                          window.location.href = `/?post=${createdPostId}`;
+                        }
+                      } else {
+                        verdictDetailRef.current?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "start",
+                        });
+                      }
+                    }}
+                    className="w-full md:w-auto rounded-2xl bg-amber-500 px-6 py-4 font-black text-black hover:bg-amber-400 transition"
+                  >
+                    판결문 상세보기
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!canSubmit}
+                    className="w-full md:w-auto rounded-2xl bg-amber-500 px-6 py-4 font-black text-black hover:bg-amber-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    판결 요청
+                  </button>
+                )}
               </div>
             </form>
           </div>

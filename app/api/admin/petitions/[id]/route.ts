@@ -4,9 +4,9 @@ import { cookies } from "next/headers";
 
 export const runtime = "nodejs";
 
-async function isOperatorLoggedIn(): Promise<boolean> {
+function isOperatorLoggedIn(): boolean {
   try {
-    const cookieStore = await cookies();
+    const cookieStore = cookies();
     const session = cookieStore.get("operator_session");
     return session?.value === "authenticated";
   } catch {
@@ -20,7 +20,7 @@ export async function DELETE(
 ) {
   try {
     // 대법관 확인
-    if (!(await isOperatorLoggedIn())) {
+    if (!isOperatorLoggedIn()) {
       return NextResponse.json({ error: "대법관 권한이 필요합니다." }, { status: 403 });
     }
 

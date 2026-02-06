@@ -3,6 +3,21 @@ import { createSupabaseServerClient } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
+async function isBlockedIp(ip: string) {
+  if (!ip || ip === "unknown") return false;
+  const supabase = createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("blocked_ips")
+    .select("id")
+    .eq("ip_address", ip)
+    .maybeSingle();
+  if (error) {
+    console.error("[GAEPAN] blocked_ips check error (vote):", error);
+    return false;
+  }
+  return !!data;
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -34,6 +49,13 @@ export async function PATCH(
       request.headers.get("cf-connecting-ip") ||
       request.headers.get("x-real-ip") ||
       "unknown";
+
+    if (await isBlockedIp(ip)) {
+      return NextResponse.json(
+        { error: "차단된 사용자입니다. 투표를 진행할 수 없습니다." },
+        { status: 403 },
+      );
+    }
 
     const supabase = createSupabaseServerClient();
 

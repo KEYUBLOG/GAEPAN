@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* 박스 모델: 패딩/보더가 너비에 포함되도록 */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 /* 사이트 전체 다크모드 */
 :root {
   --background: #0c0c0e;
@@ -14,12 +21,24 @@
 }
 
 html {
+  margin: 0;
+  padding: 0;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 body {
+  margin: 0;
+  padding: 0;
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
   overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 카드/모달 내 이미지·아이콘 모바일 리사이징 */
+img {
+  max-width: 100%;
+  height: auto;
 }

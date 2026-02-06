@@ -37,6 +37,22 @@ export function createSupabaseServerClient() {
   });
 }
 
+/** 서버 전용. 조회수 증가 등 RLS를 우회해야 할 때 사용. env에 SUPABASE_SERVICE_ROLE_KEY 설정 필요. */
+export function createSupabaseServiceRoleClient(): SupabaseClient<Database> | null {
+  if (typeof window !== "undefined") return null;
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY_SECRET?.trim();
+  if (!key) return null;
+  return createClient<Database>(getSupabaseUrl(), key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
+
 export function getSupabaseBrowserClient() {
   if (!browserClient) {
     browserClient = createClient<Database>(

@@ -3,7 +3,8 @@
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { animate } from "framer-motion";
+import { Logo } from "@/app/components/Logo";
+import { animate, motion } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 const TRIAL_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -162,8 +163,9 @@ function HomeContent() {
     verdict: JudgeVerdict;
     imageUrl?: string | null;
   } | null>(null);
+  const [createdPostId, setCreatedPostId] = useState<string | null>(null);
   const [judgeError, setJudgeError] = useState<string | null>(null);
-  const CATEGORY_OPTIONS = ["연애", "직장생활", "가족", "친구", "이웃/매너", "사회이슈", "기타"] as const;
+  const CATEGORY_OPTIONS = ["연애", "직장생활", "가족", "결혼생활", "육아", "친구", "이웃/매너", "사회이슈", "기타"] as const;
   const [form, setForm] = useState({
     title: "",
     details: "",
@@ -224,6 +226,7 @@ function HomeContent() {
   const [jurorLabels, setJurorLabels] = useState<Record<string, string>>({});
   const [recentPosts, setRecentPosts] = useState<PostPreview[]>([]);
   const [topGuiltyPost, setTopGuiltyPost] = useState<PostPreview | null>(null);
+  const [topGuiltyPostCommentCount, setTopGuiltyPostCommentCount] = useState<number | null>(null);
   const [isLoadingPosts, setIsLoadingPosts] = useState(false);
   const [postsError, setPostsError] = useState<string | null>(null);
   const [selectedPost, setSelectedPost] = useState<PostPreview | null>(null);
@@ -271,6 +274,7 @@ function HomeContent() {
   const [editPostId, setEditPostId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
+  const [editCategory, setEditCategory] = useState("");
   const [editPassword, setEditPassword] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -315,6 +319,7 @@ function HomeContent() {
   const deletePasswordRef = useRef<HTMLInputElement | null>(null);
   const commentDeletePasswordRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const verdictDetailRef = useRef<HTMLDivElement | null>(null);
 
   // 사이트 전체: 우클릭·드래그·텍스트 선택(스크랩) 금지
   useEffect(() => {
@@ -329,19 +334,25 @@ function HomeContent() {
     };
   }, []);
 
-  // 오늘 확정된 재판 집계 (실시간 사법 전광판)
+  // 오늘 확정된 재판 집계 (실시간 사법 전광판) — "오늘 투표가 끝난" 사건 기준
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
 
     const loadTodayStats = async () => {
       try {
-        const start = new Date();
-        start.setHours(0, 0, 0, 0);
+        const now = new Date();
+        const startOfToday = new Date(now);
+        startOfToday.setHours(0, 0, 0, 0);
+        const endOfToday = new Date(startOfToday);
+        endOfToday.setDate(endOfToday.getDate() + 1);
+        // 투표가 오늘 끝날 수 있는 글: 최소 2일치 (어제 생성 → 오늘 24h 만료)
+        const fromDate = new Date(startOfToday);
+        fromDate.setDate(fromDate.getDate() - 2);
 
         const { data, error } = await supabase
           .from("posts")
           .select("id, guilty, not_guilty, ratio, trial_type, created_at, voting_ended_at, status")
-          .gte("created_at", start.toISOString())
+          .gte("created_at", fromDate.toISOString())
           .neq("status", "판결불가");
 
         if (error) throw error;
@@ -357,14 +368,26 @@ function HomeContent() {
           status?: string | null;
         }>;
 
+        // 1) 투표가 이미 끝난 글만
         const completed = rows.filter((row) =>
           !isVotingOpen(row.created_at ?? null, row.voting_ended_at ?? null),
         );
 
-        const total = completed.length;
+        // 2) "투표가 끝난 시각"이 오늘(로컬 날짜)인 것만 — 오늘 확정된 사건
+        const endedAt = (row: (typeof rows)[0]) => {
+          if (row.voting_ended_at) return new Date(row.voting_ended_at).getTime();
+          const created = row.created_at ? new Date(row.created_at).getTime() : 0;
+          return created + TRIAL_DURATION_MS;
+        };
+        const todayCompleted = completed.filter((row) => {
+          const t = endedAt(row);
+          return t >= startOfToday.getTime() && t < endOfToday.getTime();
+        });
+
+        const total = todayCompleted.length;
         let wins = 0;
 
-        for (const row of completed) {
+        for (const row of todayCompleted) {
           const p = {
             trial_type: row.trial_type ?? null,
             guilty: Number(row.guilty) || 0,
@@ -385,8 +408,27 @@ function HomeContent() {
 
     loadTodayStats();
 
-    const interval = setInterval(loadTodayStats, 60_000);
-    return () => clearInterval(interval);
+    // posts INSERT/UPDATE 시 전광판 즉시 갱신
+    const channel = supabase
+      .channel("today-stats-realtime")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "posts" },
+        () => { loadTodayStats(); },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "posts" },
+        () => { loadTodayStats(); },
+      )
+      .subscribe(() => {});
+
+    const interval = setInterval(loadTodayStats, 30_000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+    };
   }, []);
 
   const searchParams = useSearchParams();
@@ -462,6 +504,7 @@ function HomeContent() {
     setIsReviewing(false);
     setIsAccuseOpen(false);
     setJudgeError(null);
+    setCreatedPostId(null);
     setImageFile(null);
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     setImagePreviewUrl(null);
@@ -473,6 +516,7 @@ function HomeContent() {
     setIsAccuseOpen(true);
     setIsReviewing(false);
     setJudgeResult(null);
+    setCreatedPostId(null);
     setJudgeError(null);
     setUploadError(null);
   };
@@ -538,27 +582,50 @@ function HomeContent() {
       setPostsError(null);
       try {
         const postColumns = "id, title, plaintiff, defendant, content, verdict, verdict_rationale, ratio, created_at, guilty, not_guilty, image_url, author_id, case_number, category, trial_type, voting_ended_at";
-        const [{ data: topData, error: topError }, { data: listData, error: listError }] = await Promise.all([
-          supabase
-            .from("posts")
-            .select(postColumns)
-            .neq("status", "판결불가")
-            .order("guilty", { ascending: false })
-            .limit(1),
-          supabase
-            .from("posts")
-            .select(postColumns)
-            .neq("status", "판결불가")
-            .order("created_at", { ascending: false })
-            .limit(10),
-        ]);
+        const [{ data: topData, error: topError }, { data: listData, error: listError }, { data: blockedRows }] =
+          await Promise.all([
+            supabase
+              .from("posts")
+              .select(postColumns)
+              .neq("status", "판결불가")
+              .order("guilty", { ascending: false })
+              .limit(1),
+            supabase
+              .from("posts")
+              .select(postColumns)
+              .neq("status", "판결불가")
+              .order("created_at", { ascending: false })
+              .limit(10),
+            supabase.from("blocked_ips").select("ip_address"),
+          ]);
 
         if (topError) throw topError;
         if (listError) throw listError;
 
-        if (topData?.[0]) setTopGuiltyPost(toPostPreview(topData[0] as Record<string, unknown>));
+        const blockedSet = new Set(
+          (blockedRows ?? [])
+            .map((r) => (r as { ip_address?: string | null }).ip_address)
+            .filter((ip): ip is string => typeof ip === "string" && ip.length > 0),
+        );
+
+        const mapPost = (row: Record<string, unknown>) => toPostPreview(row);
+
+        const topPost =
+          topData?.[0] && !blockedSet.has(String((topData[0] as any).ip_address ?? ""))
+            ? mapPost(topData[0] as Record<string, unknown>)
+            : null;
+
+        if (topPost) setTopGuiltyPost(topPost);
         else setTopGuiltyPost(null);
-        setRecentPosts((listData ?? []).map((row) => toPostPreview(row as Record<string, unknown>)));
+
+        const list = (listData ?? [])
+          .filter((row) => {
+            const ip = (row as any).ip_address as string | null | undefined;
+            return !ip || !blockedSet.has(String(ip));
+          })
+          .map((row) => mapPost(row as Record<string, unknown>));
+
+        setRecentPosts(list);
       } catch (err) {
         const isRls = isRlsOrPolicyError(err);
         setPostsError(
@@ -703,8 +770,10 @@ function HomeContent() {
             
             loggedVotes.current.add(key);
           }
-          
-          setCourtLogs(logs);
+
+          // logs는 오래된 것 → 최신 순으로 쌓여 있으므로,
+          // 화면에는 최신 기록이 위에 오도록 역순으로 뒤집어서 저장
+          setCourtLogs(logs.reverse());
         }
       });
 
@@ -738,9 +807,10 @@ function HomeContent() {
           };
           
           setCourtLogs((prev) => {
-            const updated = [...prev, newLog];
+            // 최신 로그가 항상 위에 오도록 앞쪽에 추가
+            const updated = [newLog, ...prev];
             // 최대 100개까지만 유지
-            return updated.slice(-100);
+            return updated.slice(0, 100);
           });
 
           // 자동 스크롤
@@ -759,12 +829,12 @@ function HomeContent() {
     };
   }, [recentPosts]);
 
-  // courtLogs가 업데이트될 때마다 자동 스크롤
+  // courtLogs가 업데이트될 때마다 자동 스크롤 (최신 기록이 위에 오도록 상단으로)
   useEffect(() => {
     if (courtLogs.length > 0) {
       setTimeout(() => {
         courtLogsRef.current?.scrollTo({
-          top: courtLogsRef.current.scrollHeight,
+          top: 0,
           behavior: "smooth",
         });
       }, 100);
@@ -871,6 +941,25 @@ function HomeContent() {
     setJurorLabels(map);
   }, [comments, selectedPost?.author_id]);
 
+  // 판결문 상세 모달이 열려 있을 때 배경 스크롤 잠금
+  useEffect(() => {
+    if (!selectedPost) return;
+    const scrollY = window.scrollY;
+    document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.top = "";
+      document.body.style.left = "";
+      document.body.style.right = "";
+      window.scrollTo(0, scrollY);
+    };
+  }, [selectedPost]);
+
   useEffect(() => {
     if (!isAccuseOpen) return;
     const scrollY = window.scrollY;
@@ -958,8 +1047,8 @@ function HomeContent() {
       });
 
       type JudgeApiResponse =
-        | { ok: true; mock?: boolean; verdict: JudgeVerdict }
-        | { ok: true; status: "판결불가"; verdict: null }
+        | { ok: true; mock?: boolean; verdict: JudgeVerdict; post_id?: string | null }
+        | { ok: true; status: "판결불가"; verdict: null; post_id?: string | null }
         | { ok: false; error?: string };
 
       let data: JudgeApiResponse | null = null;
@@ -1007,6 +1096,9 @@ function HomeContent() {
         verdict: verdictPayload,
         imageUrl: imageUrl && imageUrl.length > 0 ? imageUrl : null,
       });
+      const pid =
+        (data && "post_id" in data && (data as any).post_id) ? String((data as any).post_id) : null;
+      setCreatedPostId(pid);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "알 수 없는 오류";
       setJudgeError(msg);
@@ -1040,6 +1132,7 @@ function HomeContent() {
         else delete next[postId];
         return next;
       });
+      setStoredVote(postId, data.currentVote ?? null);
 
       setRecentPosts((prev) =>
         prev.map((p) =>
@@ -1164,12 +1257,13 @@ function HomeContent() {
     setEditPostId(null);
     setEditTitle("");
     setEditContent("");
+    setEditCategory("");
     setEditPassword("");
     setEditError(null);
     setEditSubmitting(false);
   };
 
-  const handleEditPost = async (postId: string, payload: { password: string; title: string; content: string }) => {
+  const handleEditPost = async (postId: string, payload: { password: string; title: string; content: string; category?: string | null }) => {
     if (!postId?.trim() || !payload.password.trim()) return;
     setEditSubmitting(true);
     setEditError(null);
@@ -1181,6 +1275,7 @@ function HomeContent() {
           password: payload.password.trim(),
           title: payload.title.trim(),
           content: payload.content,
+          category: payload.category === "" ? null : payload.category ?? undefined,
         }),
       });
       const data = (await r.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
@@ -1189,10 +1284,12 @@ function HomeContent() {
         setEditSubmitting(false);
         return;
       }
-      const { title, content } = { title: payload.title.trim(), content: payload.content };
-      setSelectedPost((prev) => (prev?.id === postId ? { ...prev, title, content } : prev));
-      setRecentPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, title, content } : p)));
-      setTopGuiltyPost((prev) => (prev?.id === postId ? { ...prev, title, content } : prev));
+      const title = payload.title.trim();
+      const content = payload.content;
+      const category = payload.category === "" ? null : (payload.category ?? null);
+      setSelectedPost((prev) => (prev?.id === postId ? { ...prev, title, content, category } : prev));
+      setRecentPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, title, content, category } : p)));
+      setTopGuiltyPost((prev) => (prev?.id === postId ? { ...prev, title, content, category } : prev));
       closeEditModal();
       setPostMenuOpenId(null);
       setDeleteToast({ message: "판결문이 수정되었습니다." });
@@ -1345,12 +1442,46 @@ function HomeContent() {
     );
   }, [filteredRecentPosts]);
 
+  // 오늘의 개판 카드용 댓글 수 (배심원 참여 문구)
+  useEffect(() => {
+    const postId = filteredTopGuiltyPost?.id;
+    if (!postId) {
+      setTopGuiltyPostCommentCount(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/posts/${postId}/comments`)
+      .then((r) => r.json())
+      .then((data: { comments?: Array<{ author_id?: string | null }>; error?: string }) => {
+        if (cancelled) return;
+        const list = Array.isArray(data.comments) ? data.comments : [];
+        const uniqueAuthors = new Set(list.map((c) => c.author_id ?? "anonymous"));
+        setTopGuiltyPostCommentCount(uniqueAuthors.size);
+      })
+      .catch(() => {
+        if (!cancelled) setTopGuiltyPostCommentCount(null);
+      });
+    return () => { cancelled = true; };
+  }, [filteredTopGuiltyPost?.id]);
+
   const weeklyWinners = useMemo(() => {
     const ended = recentPosts.filter((p) => !isVotingOpen(p.created_at, p.voting_ended_at) && p.guilty > 0);
+    const now = new Date();
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+
     const byWeek = new Map<string, { year: number; week: number; post: typeof ended[0] }>();
+
     for (const p of ended) {
       const key = getWeekFromEndAt(p.voting_ended_at, p.created_at);
       if (!key) continue;
+
+      // 투표 종료 시각이 오늘 이후(오늘 포함)인 사건은 아직 진행 중인 주로 보고 제외
+      const endedTime = p.voting_ended_at
+        ? new Date(p.voting_ended_at).getTime()
+        : (p.created_at ? new Date(p.created_at).getTime() : 0) + TRIAL_DURATION_MS;
+      if (endedTime >= startOfToday.getTime()) continue;
+
       const k = `${key.year}-${key.week}`;
       const cur = byWeek.get(k);
       if (!cur || p.guilty > cur.post.guilty) byWeek.set(k, { ...key, post: p });
@@ -1358,7 +1489,7 @@ function HomeContent() {
     return Array.from(byWeek.values()).sort((a, b) => b.year - a.year || b.week - a.week);
   }, [recentPosts]);
 
-  // 현재 주차에서 투표 합계가 가장 높은 게시글 (금주의 개판 하이라이트)
+  // 현재 주차에서 투표 합계가 가장 높은 게시글 (오늘의 개판 하이라이트)
   const currentWeekTopPost = useMemo(() => {
     const currentWeek = getCurrentWeek();
     const currentWeekPosts = recentPosts.filter((p) => {
@@ -1583,7 +1714,7 @@ function HomeContent() {
           <div className="w-full max-w-lg rounded-2xl bg-zinc-950 border border-zinc-800 p-5 space-y-4 my-8">
             <h4 className="text-sm font-black text-zinc-100">판결문 수정</h4>
             <p className="text-xs text-zinc-400">
-              제목과 내용을 수정한 뒤, 기소 시 설정한 판결문 수정 및 삭제 비밀번호를 입력하세요.
+              제목, 카테고리, 내용을 수정한 뒤, 기소 시 설정한 판결문 수정 및 삭제 비밀번호를 입력하세요.
             </p>
             <div>
               <label className="block text-xs font-bold text-zinc-400 mb-1">제목</label>
@@ -1596,6 +1727,20 @@ function HomeContent() {
                 className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-500/60 outline-none disabled:opacity-60"
                 placeholder="제목"
               />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-zinc-400 mb-1">카테고리</label>
+              <select
+                value={editCategory}
+                onChange={(e) => setEditCategory(e.target.value)}
+                disabled={editSubmitting}
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 focus:border-amber-500/60 outline-none disabled:opacity-60"
+              >
+                <option value="">선택 안 함</option>
+                {CATEGORY_OPTIONS.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-bold text-zinc-400 mb-1">내용 (사건 경위)</label>
@@ -1635,7 +1780,7 @@ function HomeContent() {
               </button>
               <button
                 type="button"
-                onClick={() => handleEditPost(editPostId, { password: editPassword, title: editTitle, content: editContent })}
+                onClick={() => handleEditPost(editPostId, { password: editPassword, title: editTitle, content: editContent, category: editCategory || null })}
                 disabled={!editTitle.trim() || !editPassword.trim() || editSubmitting}
                 className="rounded-xl bg-amber-500 px-3 py-1.5 text-xs font-bold text-black hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -1689,7 +1834,7 @@ function HomeContent() {
       ) : null}
       {/* GNB (상단바) */}
       <nav className="px-4 py-3 md:p-6 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50">
-        <h1 className="text-lg md:text-2xl font-black tracking-tighter text-amber-500 italic pr-2">GAEPAN</h1>
+        <Logo className="pr-2" />
         
         {/* 우측 상단 메뉴 버튼 (모바일/PC 공통) */}
         <button
@@ -1849,17 +1994,17 @@ function HomeContent() {
         </div>
       </div>
 
-      {/* Main Grid Container */}
-      <div className="max-w-7xl mx-auto px-4 md:px-8">
+      {/* Main Grid Container — 모바일 16px 패딩, 데스크톱 32px */}
+      <div className="max-w-7xl mx-auto px-4 md:px-8 w-full max-w-[100vw] overflow-x-hidden">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
           {/* Main Content Area */}
-          <div className="md:col-span-8 md:pr-6 space-y-12">
+          <div className="md:col-span-8 md:pr-6 space-y-12 min-w-0">
             {/* Hero Section */}
-            <main className="pt-12 md:pt-8 pb-12 md:pb-20 text-center">
-              <div className="inline-block px-4 py-1.5 mb-6 text-xs font-bold tracking-widest uppercase bg-zinc-900 border border-zinc-800 rounded-full text-amber-500">
+            <main className="pt-6 md:pt-8 pb-12 md:pb-20 text-center">
+              <div className="inline-block px-4 py-1.5 mb-3 md:mb-6 text-xs font-bold tracking-widest uppercase bg-zinc-900 border border-zinc-800 rounded-full text-amber-500">
                 24/7 무자비한 AI 법정
               </div>
-              <h2 className="text-4xl sm:text-6xl md:text-8xl font-black mb-6 md:mb-8 tracking-tighter leading-tight mt-12 md:mt-0">
+              <h2 className="text-4xl sm:text-6xl md:text-8xl font-black mb-6 md:mb-8 tracking-tighter leading-tight mt-2 md:mt-0">
                 누가 <span className="text-amber-500 underline decoration-zinc-800">죄인</span>인가?
               </h2>
               <p className="text-zinc-500 text-base sm:text-lg md:text-2xl mb-8 md:mb-12 font-medium leading-relaxed md:leading-relaxed px-4 text-center">
@@ -1885,345 +2030,190 @@ function HomeContent() {
               </div>
             </main>
 
-            {/* 진행 중: 금주의 개판 / 완료: 최근 마감된 재판 (클릭 시 상세 모달) */}
+            {/* 진행 중: 오늘의 개판 / 완료: 최근 마감된 재판 (클릭 시 상세 모달) */}
             {filteredTopGuiltyPost ? (
-              <section className="pt-6 md:pt-12 pb-8 md:pb-16 space-y-4">
-                <h3 className="text-2xl md:text-3xl font-bold text-left flex items-center gap-2">
-                  <span>🔥</span>
-                  <span>금주의 개판</span>
-                </h3>
+              <section className="pt-4 md:pt-12 pb-4 md:pb-16 space-y-3 md:space-y-4 min-w-0 overflow-x-hidden">
+                <div className="flex flex-col gap-1">
+                  {/* 모바일: 제목 + LIVE 한 줄 / 데스크톱도 동일 */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 gap-y-1">
+                    <h3 className="text-2xl md:text-3xl font-bold text-left flex items-center gap-2">
+                      <span>🔥</span>
+                      <span>오늘의 개판</span>
+                    </h3>
+                  </div>
+                  <p className="text-zinc-500 text-sm max-w-2xl">
+                    오늘 진행 중인 재판중 가장 핫한 재판입니다.
+                  </p>
+                </div>
+          {/* 오늘의 개판 카드 — 모바일 좌우 여백 컨테이너 px-4와 동일하게 */}
           <div
             role="button"
             tabIndex={0}
             onClick={() => setSelectedPost(filteredTopGuiltyPost)}
             onKeyDown={(e) => e.key === "Enter" && setSelectedPost(filteredTopGuiltyPost)}
-            className="w-full rounded-[2rem] border-2 border-amber-500/50 bg-transparent p-4 md:p-10 cursor-pointer select-none transition-transform duration-200 hover:scale-[1.02] hover:border-amber-500/60 active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 relative overflow-hidden"
+            className="group w-full min-w-0 rounded-[1.25rem] md:rounded-[1.75rem] border bg-zinc-950 cursor-pointer select-none flex flex-col gap-2 overflow-x-hidden break-all relative"
+            style={{
+              borderColor: "rgba(255, 215, 0, 0.9)",
+            }}
           >
-            {/* LIVE 배지: 모바일은 상단 한 줄로, PC는 우측 상단 고정 */}
-            {trialTab === "ongoing" && isVotingOpen(filteredTopGuiltyPost.created_at, filteredTopGuiltyPost.voting_ended_at) ? (
-              <>
-                {/* 모바일: LIVE 상단 중앙, ⋯ 우측 최상단만 */}
-                <div className="flex md:hidden relative items-center justify-center mb-4 pt-1">
-                  <div className="flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-full bg-zinc-900/90 border border-amber-500/30 text-amber-400 font-bold text-[10px] md:text-xs shadow-lg">
-                    <span className="relative flex h-2 w-2 shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500 animate-pulse"></span>
+            <div className="rounded-[1.25rem] md:rounded-[1.75rem] p-4 md:p-6 max-[480px]:p-4 flex flex-col gap-3 relative overflow-hidden min-w-0">
+              {/* LIVE — 카드 상단 가운데, 오늘의 개판과 동일 테두리·라운딩 */}
+              {trialTab === "ongoing" && isVotingOpen(filteredTopGuiltyPost.created_at, filteredTopGuiltyPost.voting_ended_at) ? (
+                <div className="flex justify-center mb-2">
+                  <span
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[10px] md:text-[11px] text-zinc-300 font-bold bg-zinc-950/80"
+                    style={{ borderColor: "rgba(255, 215, 0, 0.5)" }}
+                  >
+                    <span className="relative flex h-2.5 w-2.5 shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-70" style={{ animationDuration: "1.2s" }} />
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
                     </span>
-                    <span>LIVE</span>
-                    <span className="text-zinc-300 font-medium">
-                      현재 {filteredTopGuiltyPost.guilty + filteredTopGuiltyPost.not_guilty}명이 판결 중
+                    <span className="text-red-400/90">LIVE</span>
+                    <span>현재 {filteredTopGuiltyPost.guilty + filteredTopGuiltyPost.not_guilty}명이 판결 중</span>
+                  </span>
+                </div>
+              ) : null}
+              {/* 상단: 카테고리·오늘의 개판 배지(좌) + 사건번호·메뉴(우) */}
+              <div className="flex items-center justify-between mb-2 text-[11px] text-zinc-500">
+                <div className="flex items-center gap-2 shrink-0">
+                  {filteredTopGuiltyPost.category ? (
+                    <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold bg-zinc-900/80 border border-zinc-800 text-zinc-400">
+                      {filteredTopGuiltyPost.category}
                     </span>
-                  </div>
-                  <div className="absolute right-0 top-0">
+                  ) : null}
+                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold bg-amber-500/15 border border-amber-400/70 text-amber-300 whitespace-nowrap">
+                    <span>👑</span>
+                    <span>오늘의 개판</span>
+                  </span>
+                </div>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  {filteredTopGuiltyPost.case_number != null ? (
+                    <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-orange-400 whitespace-nowrap leading-none">
+                      사건 번호 {filteredTopGuiltyPost.case_number}
+                    </span>
+                  ) : null}
+                  <div className="relative">
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         setPostMenuOpenId((prev) => (prev === filteredTopGuiltyPost.id ? null : filteredTopGuiltyPost.id));
                       }}
-                      className="px-1.5 py-1 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-800/80"
+                      className="p-0.5 text-zinc-500 hover:text-zinc-300"
                       aria-label="메뉴"
                     >
                       ⋯
                     </button>
                     {postMenuOpenId === filteredTopGuiltyPost.id ? (
                       <div className="absolute right-0 mt-1 w-32 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            sharePost(filteredTopGuiltyPost.id, filteredTopGuiltyPost.title);
-                          }}
-                          className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
-                        >
-                          공유하기
-                        </button>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); sharePost(filteredTopGuiltyPost.id, filteredTopGuiltyPost.title); }} className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800">공유하기</button>
                         {isOperatorLoggedIn ? (
-                          <button
-                            type="button"
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              if (!confirm("이 글을 삭제하시겠습니까?")) return;
-                              try {
-                                const r = await fetch(`/api/admin/delete?type=post&id=${filteredTopGuiltyPost.id}`, { method: "DELETE" });
-                                if (r.ok) window.location.reload();
-                              } catch (err) {
-                                console.error("삭제 실패:", err);
-                              }
-                              setPostMenuOpenId(null);
-                            }}
-                            className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
-                          >
-                            ⚖️ 삭제
-                          </button>
+                          <button type="button" onClick={async (e) => { e.stopPropagation(); if (!confirm("이 글을 삭제하시겠습니까?")) return; try { const r = await fetch(`/api/admin/delete?type=post&id=${filteredTopGuiltyPost.id}`, { method: "DELETE" }); if (r.ok) window.location.reload(); } catch (err) { console.error("삭제 실패:", err); } setPostMenuOpenId(null); }} className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800">⚖️ 삭제</button>
                         ) : (
                           <>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeletePostId(filteredTopGuiltyPost.id);
-                                setPostMenuOpenId(null);
-                              }}
-                              className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
-                            >
-                              판결문 삭제
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openReportModal("post", filteredTopGuiltyPost.id);
-                                setPostMenuOpenId(null);
-                              }}
-                              className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
-                            >
-                              신고하기
-                            </button>
+                            <button type="button" onClick={(e) => { e.stopPropagation(); setDeletePostId(filteredTopGuiltyPost.id); setPostMenuOpenId(null); }} className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800">판결문 삭제</button>
+                            <button type="button" onClick={(e) => { e.stopPropagation(); openReportModal("post", filteredTopGuiltyPost.id); setPostMenuOpenId(null); }} className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800">신고하기</button>
                           </>
                         )}
                       </div>
                     ) : null}
                   </div>
                 </div>
-                {/* PC: 우측 상단 고정 */}
-                <div className="hidden md:flex absolute top-3 right-4 z-10 items-center gap-2">
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-full bg-zinc-900/90 border border-amber-500/30 text-amber-400 font-bold text-xs shadow-lg">
-                    <span className="relative flex h-2 w-2 shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500 animate-pulse"></span>
-                    </span>
-                    <span>LIVE</span>
-                    <span className="text-zinc-300 font-medium whitespace-nowrap">
-                      현재 {filteredTopGuiltyPost.guilty + filteredTopGuiltyPost.not_guilty}명이 판결 중
-                    </span>
-                  </div>
-                  <div className="relative">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPostMenuOpenId((prev) => (prev === filteredTopGuiltyPost.id ? null : filteredTopGuiltyPost.id));
-                    }}
-                    className="px-1.5 py-1 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-800/80"
-                    aria-label="메뉴"
-                  >
-                    ⋯
-                  </button>
-                  {postMenuOpenId === filteredTopGuiltyPost.id ? (
-                    <div className="absolute right-0 mt-1 w-32 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          sharePost(filteredTopGuiltyPost.id, filteredTopGuiltyPost.title);
-                        }}
-                        className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
-                      >
-                        공유하기
-                      </button>
-                      {isOperatorLoggedIn ? (
-                        <button
-                          type="button"
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            if (!confirm("이 글을 삭제하시겠습니까?")) return;
-                            try {
-                              const r = await fetch(`/api/admin/delete?type=post&id=${filteredTopGuiltyPost.id}`, { method: "DELETE" });
-                              if (r.ok) window.location.reload();
-                            } catch (err) {
-                              console.error("삭제 실패:", err);
-                            }
-                            setPostMenuOpenId(null);
-                          }}
-                          className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
-                        >
-                          ⚖️ 삭제
-                        </button>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeletePostId(filteredTopGuiltyPost.id);
-                              setPostMenuOpenId(null);
-                            }}
-                            className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
-                          >
-                            판결문 삭제
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openReportModal("post", filteredTopGuiltyPost.id);
-                              setPostMenuOpenId(null);
-                            }}
-                            className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
-                          >
-                            신고하기
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
               </div>
-              </>
-            ) : null}
 
-            {/* 상단 메타: 카테고리 + 사건 번호 + 메뉴 */}
-            <div className="flex items-start justify-between mb-4 text-[11px] text-zinc-500">
-              <div className="flex items-center gap-2">
-                {filteredTopGuiltyPost.category ? (
-                  <span className="inline-block px-3 py-1 rounded-full text-[10px] font-bold bg-zinc-900/80 border border-zinc-800 text-zinc-400 shrink-0">
-                    {filteredTopGuiltyPost.category}
-                  </span>
+              {/* 제목 + 내용 요약 — 제목 크기 더 키우고 강조 */}
+              <div className="mb-2">
+                {trialTab === "ongoing" && isUrgent(filteredTopGuiltyPost.created_at) ? (
+                  <span className="text-[10px] md:text-[11px] font-bold text-red-500 block mb-1 text-left">[🔥 판결 임박]</span>
                 ) : null}
-                {filteredTopGuiltyPost.case_number != null ? (
-                  <span className="text-[10px] font-semibold text-amber-400">
-                    사건 번호 {filteredTopGuiltyPost.case_number}
-                  </span>
+                <h4 className="text-lg md:text-2xl font-extrabold text-amber-50 group-hover:text-amber-200 transition duration-200 ease-out line-clamp-1 text-left overflow-hidden text-ellipsis break-words">
+                  {filteredTopGuiltyPost.title}
+                </h4>
+                {filteredTopGuiltyPost.content ? (
+                  <p className="text-[11px] text-zinc-400 line-clamp-2 text-left break-all whitespace-normal min-w-0">
+                    {filteredTopGuiltyPost.content}
+                  </p>
                 ) : null}
               </div>
-              
-              {/* 우측: ⋯ (LIVE 표시 시에는 상단에만 있으므로 여기선 숨김) */}
-              <div className={`flex items-center gap-3 shrink-0 ${trialTab === "ongoing" && isVotingOpen(filteredTopGuiltyPost.created_at, filteredTopGuiltyPost.voting_ended_at) ? "hidden" : ""}`}>
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPostMenuOpenId((prev) => (prev === filteredTopGuiltyPost.id ? null : filteredTopGuiltyPost.id));
-                    }}
-                    className="px-1 text-zinc-500 hover:text-zinc-300"
-                    aria-label="메뉴"
-                  >
-                    ⋯
-                  </button>
-                  {postMenuOpenId === filteredTopGuiltyPost.id ? (
-                    <div className="absolute right-0 mt-1 w-32 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          sharePost(filteredTopGuiltyPost.id, filteredTopGuiltyPost.title);
-                        }}
-                        className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
-                      >
-                        공유하기
-                      </button>
-                      {isOperatorLoggedIn ? (
-                        <button
-                          type="button"
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            if (!confirm("이 글을 삭제하시겠습니까?")) return;
-                            try {
-                              const r = await fetch(`/api/admin/delete?type=post&id=${filteredTopGuiltyPost.id}`, { method: "DELETE" });
-                              if (r.ok) window.location.reload();
-                            } catch (err) {
-                              console.error("삭제 실패:", err);
-                            }
-                            setPostMenuOpenId(null);
-                          }}
-                          className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
-                        >
-                          ⚖️ 삭제
-                        </button>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeletePostId(filteredTopGuiltyPost.id);
-                              setPostMenuOpenId(null);
-                            }}
-                            className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
-                          >
-                            판결문 삭제
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openReportModal("post", filteredTopGuiltyPost.id);
-                              setPostMenuOpenId(null);
-                            }}
-                            className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
-                          >
-                            신고하기
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </div>
 
-            {/* 제목 + 내용 요약 */}
-            <div className="mb-4 text-center">
-              {trialTab === "ongoing" && isUrgent(filteredTopGuiltyPost.created_at) ? (
-                <span className="text-[11px] font-bold text-red-500 block mb-1">[🔥 판결 임박]</span>
-              ) : null}
-              <h3 className="text-lg md:text-2xl font-bold text-amber-50 mb-1 leading-tight truncate break-words">
-                {filteredTopGuiltyPost.title}
-              </h3>
-              {filteredTopGuiltyPost.content ? (
-                <p className="text-sm text-zinc-400 line-clamp-2 break-words">
-                  {filteredTopGuiltyPost.content}
+              {/* 하단 정보 — 진행 중 카드와 동일 */}
+              <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2 mt-1 break-all whitespace-normal min-w-0">
+                {filteredTopGuiltyPost.plaintiff === "익명" && filteredTopGuiltyPost.defendant === "익명" ? (
+                  <span>익명</span>
+                ) : (
+                  <>
+                    {filteredTopGuiltyPost.plaintiff ? <span>원고 {filteredTopGuiltyPost.plaintiff}</span> : null}
+                    {filteredTopGuiltyPost.plaintiff && filteredTopGuiltyPost.defendant ? <span>·</span> : null}
+                    {filteredTopGuiltyPost.defendant ? <span>피고 {filteredTopGuiltyPost.defendant}</span> : null}
+                  </>
+                )}
+              </div>
+              {isVotingOpen(filteredTopGuiltyPost.created_at, filteredTopGuiltyPost.voting_ended_at) ? (
+                <p className="text-[11px] font-bold text-amber-400 mb-2 tabular-nums text-center">
+                  ⏳ 남은 시간 {formatCountdown(Math.max(0, getVotingEndsAt(filteredTopGuiltyPost.created_at) - countdownNow))}
                 </p>
-              ) : null}
-            </div>
-            
-            {/* 투표 현황 게이지 (유죄/무죄 비율) */}
-            {(() => {
-              const total = filteredTopGuiltyPost.guilty + filteredTopGuiltyPost.not_guilty;
-              const guiltyPct = total ? Math.round((filteredTopGuiltyPost.guilty / total) * 100) : 0;
-              const notGuiltyPct = total ? Math.round((filteredTopGuiltyPost.not_guilty / total) * 100) : 0;
-              return (
-                <div className="mb-4 space-y-2">
-                  <div className="flex items-center justify-between text-xs text-zinc-400">
-                    <span className="text-red-400">유죄 {guiltyPct}% ({filteredTopGuiltyPost.guilty}표)</span>
-                    <span className="text-blue-400">무죄 {notGuiltyPct}% ({filteredTopGuiltyPost.not_guilty}표)</span>
-                  </div>
-                  <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden flex">
-                    <div
-                      className="bg-red-500 h-full transition-all duration-300"
-                      style={{ width: `${guiltyPct}%` }}
-                    />
-                    <div
-                      className="bg-blue-500 h-full transition-all duration-300"
-                      style={{ width: `${notGuiltyPct}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* 하단 정보 */}
-            <div className="flex flex-wrap items-center justify-center gap-2 text-sm text-zinc-400 leading-relaxed">
-              {filteredTopGuiltyPost.plaintiff === "익명" && filteredTopGuiltyPost.defendant === "익명" ? (
-                <span>익명</span>
               ) : (
-                <>
-                  {filteredTopGuiltyPost.plaintiff ? <span>원고 {filteredTopGuiltyPost.plaintiff}</span> : null}
-                  {filteredTopGuiltyPost.plaintiff && filteredTopGuiltyPost.defendant ? <span>·</span> : null}
-                  {filteredTopGuiltyPost.defendant ? <span>피고 {filteredTopGuiltyPost.defendant}</span> : null}
-                </>
+                <p className="text-[11px] text-zinc-500 mb-2 text-center">재판 종료</p>
               )}
-            </div>
-            {isVotingOpen(filteredTopGuiltyPost.created_at, filteredTopGuiltyPost.voting_ended_at) ? (
-              <p className="text-sm font-bold text-amber-400 mb-2 tabular-nums text-center leading-relaxed">
-                ⏳ 남은 시간 {formatCountdown(Math.max(0, getVotingEndsAt(filteredTopGuiltyPost.created_at) - countdownNow))}
-              </p>
-            ) : (
-              <p className="text-sm text-zinc-500 mb-2 text-center leading-relaxed">재판 종료</p>
-              )}
+              {/* 투표 현황 — 진행 중 카드와 동일 */}
+              {(() => {
+                const total = filteredTopGuiltyPost.guilty + filteredTopGuiltyPost.not_guilty;
+                const guiltyPct = total ? Math.round((filteredTopGuiltyPost.guilty / total) * 100) : 0;
+                const notGuiltyPct = total ? Math.round((filteredTopGuiltyPost.not_guilty / total) * 100) : 0;
+                return (
+                  <div className="mb-2 space-y-1">
+                    <div className="flex items-center justify-between text-[10px] text-zinc-500">
+                      <span className="text-red-400 text-xs md:text-sm">유죄 {guiltyPct}% ({filteredTopGuiltyPost.guilty}표)</span>
+                      <span className="text-blue-400 text-xs md:text-sm">무죄 {notGuiltyPct}% ({filteredTopGuiltyPost.not_guilty}표)</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden flex">
+                      <div className="bg-red-500 h-full transition-all duration-300" style={{ width: `${guiltyPct}%` }} />
+                      <div className="bg-blue-500 h-full transition-all duration-300" style={{ width: `${notGuiltyPct}%` }} />
+                    </div>
+                  </div>
+                );
+              })()}
+              {/* 투표 버튼 — 진행 중 카드와 동일한 패턴, 오늘의 개판에도 노출 */}
+              <div className="mt-3 flex flex-col md:flex-row items-stretch md:items-center justify-center gap-2" onClick={(e) => e.stopPropagation()}>
+                {(() => {
+                  const total = filteredTopGuiltyPost.guilty + filteredTopGuiltyPost.not_guilty;
+                  const guiltyPct = total ? Math.round((filteredTopGuiltyPost.guilty / total) * 100) : 0;
+                  const notGuiltyPct = total ? Math.round((filteredTopGuiltyPost.not_guilty / total) * 100) : 0;
+                  const isDefense = filteredTopGuiltyPost.trial_type === "DEFENSE";
+                  const first = isDefense ? "not_guilty" : "guilty";
+                  const second = isDefense ? "guilty" : "not_guilty";
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        disabled={votingId === filteredTopGuiltyPost.id || !isVotingOpen(filteredTopGuiltyPost.created_at, filteredTopGuiltyPost.voting_ended_at)}
+                        onClick={() => handleVote(filteredTopGuiltyPost.id, first)}
+                        className={`w-full md:w-auto rounded-lg px-4 py-2 md:py-1.5 h-16 md:h-auto text-sm md:text-xs font-bold transition disabled:opacity-50 shadow-sm ${
+                          first === "not_guilty"
+                            ? (userVotes[filteredTopGuiltyPost.id] === "not_guilty" ? "bg-blue-500/50 ring-1 ring-blue-400/60 text-blue-100" : "bg-blue-500/20 hover:bg-blue-500/30 text-blue-400")
+                            : (userVotes[filteredTopGuiltyPost.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
+                        }`}
+                      >
+                        {first === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? filteredTopGuiltyPost.not_guilty : filteredTopGuiltyPost.guilty}표
+                      </button>
+                      <button
+                        type="button"
+                        disabled={votingId === filteredTopGuiltyPost.id || !isVotingOpen(filteredTopGuiltyPost.created_at, filteredTopGuiltyPost.voting_ended_at)}
+                        onClick={() => handleVote(filteredTopGuiltyPost.id, second)}
+                        className={`w-full md:w-auto rounded-lg px-4 py-2 md:py-1.5 h-16 md:h-auto text-sm md:text-xs font-bold transition disabled:opacity-50 shadow-sm ${
+                          second === "not_guilty"
+                            ? (userVotes[filteredTopGuiltyPost.id] === "not_guilty" ? "bg-blue-500/50 ring-1 ring-blue-400/60 text-blue-100" : "bg-blue-500/20 hover:bg-blue-500/30 text-blue-400")
+                            : (userVotes[filteredTopGuiltyPost.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
+                        }`}
+                      >
+                        {second === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? filteredTopGuiltyPost.not_guilty : filteredTopGuiltyPost.guilty}표
+                      </button>
+                    </>
+                  );
+                })()}
               </div>
+            </div>
+          </div>
             </section>
             ) : null}
 
@@ -2460,7 +2450,7 @@ function HomeContent() {
               ) : null}
 
               {judgeResult ? (
-                <div className="rounded-[2rem] border border-zinc-800 bg-zinc-950/60 p-5 md:p-6">
+                <div ref={verdictDetailRef} className="rounded-[2rem] border border-zinc-800 bg-zinc-950/60 p-5 md:p-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="inline-flex items-center gap-2 text-xs font-black tracking-widest uppercase">
@@ -2566,21 +2556,42 @@ function HomeContent() {
                 >
                   취소
                 </button>
-                <button
-                  type="submit"
-                  disabled={!canSubmit}
-                  className="w-full md:w-auto rounded-2xl bg-amber-500 px-6 py-4 font-black text-black hover:bg-amber-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  판결 요청
-                </button>
+                {judgeResult ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (createdPostId) {
+                        if (typeof window !== "undefined") {
+                          window.location.href = `/?post=${createdPostId}`;
+                        }
+                      } else {
+                        verdictDetailRef.current?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "start",
+                        });
+                      }
+                    }}
+                    className="w-full md:w-auto rounded-2xl bg-amber-500 px-6 py-4 font-black text-black hover:bg-amber-400 transition"
+                  >
+                    판결문 상세보기
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!canSubmit}
+                    className="w-full md:w-auto rounded-2xl bg-amber-500 px-6 py-4 font-black text-black hover:bg-amber-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    판결 요청
+                  </button>
+                )}
               </div>
             </form>
           </div>
         </div>
       ) : null}
 
-      {/* 진행 중인 재판 섹션 */}
-      <section className="pt-6 md:pt-12 pb-8 md:pb-16 space-y-4">
+      {/* 진행 중인 재판 섹션 — 모바일 간격 축소 */}
+      <section className="pt-4 md:pt-12 pb-4 md:pb-16 space-y-3 md:space-y-4 min-w-0 overflow-x-hidden">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div>
             <h3 className="text-2xl md:text-3xl font-black mb-1">진행 중인 재판</h3>
@@ -2644,7 +2655,7 @@ function HomeContent() {
 
         {ongoingPosts.length > 0 ? (
           <>
-            <div className="grid md:grid-cols-2 gap-4 md:gap-6 mt-6 overflow-x-hidden break-all">
+            <div className="grid md:grid-cols-2 gap-3 md:gap-6 mt-4 md:mt-6 overflow-x-hidden break-all min-w-0">
               {ongoingPosts.slice(0, 2).map((p) => (
                 <article
                   key={p.id}
@@ -2652,69 +2663,107 @@ function HomeContent() {
                   tabIndex={0}
                   onClick={() => setSelectedPost(p)}
                   onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
-                  className="group w-full max-w-[calc(100vw-2rem)] mx-auto rounded-[1.75rem] border border-zinc-900 bg-zinc-950 p-4 md:p-6 hover:border-amber-500/40 transition-all cursor-pointer select-none flex flex-col gap-2 overflow-x-hidden break-all"
+                  className="group w-full min-w-0 rounded-[1.25rem] md:rounded-[1.75rem] border border-zinc-900 bg-zinc-950 p-4 md:p-6 hover:border-amber-500/40 transition-all cursor-pointer select-none flex flex-col gap-2 overflow-x-hidden break-all"
                 >
-                {/* 상단: 카테고리 + 사건 번호 + 메뉴 */}
-                <div className="flex items-start justify-between mb-2 text-[11px] text-zinc-500">
-                  <div className="flex items-center gap-2">
+                {/* 상단: 카테고리·오늘의 개판(좌) + 사건번호·메뉴(우측) */}
+                <div className="flex items-center justify-between mb-2 text-[11px] text-zinc-500">
+                  <div className="flex items-center gap-2 shrink-0">
                     {p.category ? (
-                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-900/80 border border-zinc-800 text-zinc-400">
+                      <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold bg-zinc-900/80 border border-zinc-800 text-zinc-400">
                         {p.category}
                       </span>
                     ) : null}
-                    {p.case_number != null ? (
-                      <span className="hidden md:inline text-[10px] font-semibold text-amber-400">
-                        사건 번호 {p.case_number}
+                    {filteredTopGuiltyPost && p.id === filteredTopGuiltyPost.id ? (
+                      <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold bg-amber-500/15 border border-amber-400/70 text-amber-300 whitespace-nowrap">
+                        <span>👑</span>
+                        <span>오늘의 개판</span>
                       </span>
                     ) : null}
                   </div>
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPostMenuOpenId((prev) => (prev === p.id ? null : p.id));
-                      }}
-                      className="px-1 text-zinc-500 hover:text-zinc-300"
-                      aria-label="메뉴"
-                    >
-                      ⋯
-                    </button>
-                    {postMenuOpenId === p.id ? (
-                      <div className="absolute right-0 mt-1 w-32 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            sharePost(p.id, p.title);
-                          }}
-                          className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
-                        >
-                          공유하기
-                        </button>
-                        {isOperatorLoggedIn ? (
+                <div className="flex items-center gap-0.5 shrink-0">
+                    {p.case_number != null ? (
+                      <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-orange-400 whitespace-nowrap leading-none">
+                        사건 번호 {p.case_number}
+                      </span>
+                    ) : null}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPostMenuOpenId((prev) => (prev === p.id ? null : p.id));
+                        }}
+                        className="p-0.5 text-zinc-500 hover:text-zinc-300"
+                        aria-label="메뉴"
+                      >
+                        ⋯
+                      </button>
+                      {postMenuOpenId === p.id ? (
+                        <div className="absolute right-0 mt-1 w-40 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
                           <button
                             type="button"
-                            onClick={async (e) => {
+                            onClick={(e) => {
                               e.stopPropagation();
-                              if (!confirm("이 글을 삭제하시겠습니까?")) return;
-                              try {
-                                const r = await fetch(`/api/admin/delete?type=post&id=${p.id}`, { method: "DELETE" });
-                                if (r.ok) {
-                                  setRecentPosts((prev) => prev.filter((x) => x.id !== p.id));
-                                  setTopGuiltyPost((prev) => (prev?.id === p.id ? null : prev));
-                                  window.location.reload();
-                                }
-                              } catch (err) {
-                                console.error("삭제 실패:", err);
-                              }
-                              setPostMenuOpenId(null);
+                              sharePost(p.id, p.title);
                             }}
-                            className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
+                            className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
                           >
-                            ⚖️ 삭제
+                            공유하기
                           </button>
-                        ) : (
+                          {isOperatorLoggedIn ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (!confirm("이 작성자를 차단하시겠습니까? (해당 IP는 글/댓글 작성, 투표, 발도장이 제한됩니다)")) return;
+                                  try {
+                                    const r = await fetch("/api/admin/block", {
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ targetType: "post", id: p.id }),
+                                    });
+                                    if (!r.ok) {
+                                      const data = await r.json().catch(() => null);
+                                      alert(data?.error || "차단에 실패했습니다.");
+                                    } else {
+                                      alert("작성자가 차단되었습니다.");
+                                    }
+                                  } catch (err) {
+                                    console.error("작성자 차단 실패:", err);
+                                    alert("차단 중 오류가 발생했습니다.");
+                                  } finally {
+                                    setPostMenuOpenId(null);
+                                  }
+                                }}
+                                className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
+                              >
+                                👮 작성자 차단
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (!confirm("이 글을 삭제하시겠습니까?")) return;
+                                  try {
+                                    const r = await fetch(`/api/admin/delete?type=post&id=${p.id}`, { method: "DELETE" });
+                                    if (r.ok) {
+                                      setRecentPosts((prev) => prev.filter((x) => x.id !== p.id));
+                                      setTopGuiltyPost((prev) => (prev?.id === p.id ? null : prev));
+                                      window.location.reload();
+                                    }
+                                  } catch (err) {
+                                    console.error("삭제 실패:", err);
+                                  } finally {
+                                    setPostMenuOpenId(null);
+                                  }
+                                }}
+                                className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
+                              >
+                                ⚖️ 삭제
+                              </button>
+                            </>
+                          ) : (
                           <>
                             <button
                               type="button"
@@ -2740,8 +2789,9 @@ function HomeContent() {
                             </button>
                           </>
                         )}
-                      </div>
-                    ) : null}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
 
@@ -2750,11 +2800,11 @@ function HomeContent() {
                   {isUrgent(p.created_at) ? (
                     <span className="text-[10px] md:text-[11px] font-bold text-red-500 block mb-1 text-left">[🔥 판결 임박]</span>
                   ) : null}
-                  <h4 className="text-base md:text-lg font-bold group-hover:text-amber-400 transition line-clamp-1 text-left break-all">
+                  <h4 className="text-sm md:text-lg font-bold group-hover:text-amber-400 transition line-clamp-1 text-left overflow-hidden text-ellipsis break-words">
                     {p.title}
                   </h4>
                   {p.content ? (
-                    <p className="text-[11px] text-zinc-400 line-clamp-2 text-left break-all">
+                    <p className="text-[11px] text-zinc-400 line-clamp-2 text-left break-all min-w-0">
                       {p.content}
                     </p>
                   ) : null}
@@ -2857,9 +2907,9 @@ function HomeContent() {
             ) : null}
             </section>
 
-            {/* 판결 완료된 재판 섹션 */}
-            <section className="py-8 md:py-12">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
+            {/* 판결 완료된 재판 섹션 — 모바일 간격 축소 */}
+            <section className="py-4 md:py-12 min-w-0 overflow-x-hidden">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-4 md:mb-6">
           <div>
             <h3 className="text-2xl md:text-3xl font-black mb-1">판결 완료된 사건</h3>
             <p className="text-zinc-500 text-sm">GAEPAN 법정을 거친 판결들입니다.</p>
@@ -2896,121 +2946,175 @@ function HomeContent() {
 
         {completedPosts.length > 0 ? (
           <>
-            <div className="grid md:grid-cols-2 gap-4 md:gap-6 mt-6 overflow-x-hidden break-all">
-              {completedPosts.slice(0, 2).map((p) => (
+            <div className="grid md:grid-cols-2 gap-3 md:gap-6 mt-4 md:mt-6 overflow-x-hidden break-all min-w-0">
+              {completedPosts.slice(0, 2).map((p) => {
+                const total = p.guilty + p.not_guilty;
+                const guiltyPct = total ? Math.round((p.guilty / total) * 100) : 0;
+                const notGuiltyPct = total ? Math.round((p.not_guilty / total) * 100) : 0;
+                const verdictText = typeof p.verdict === "string" ? p.verdict : "";
+                const isDefense =
+                  p.trial_type === "DEFENSE" ||
+                  (verdictText.includes("원고 무죄") && p.trial_type !== "ACCUSATION");
+                return (
                 <article
                   key={p.id}
                   role="button"
                   tabIndex={0}
                   onClick={() => setSelectedPost(p)}
                   onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
-                  className="group w-full max-w-[calc(100vw-2rem)] mx-auto rounded-[1.75rem] border border-zinc-900 bg-zinc-950 p-4 md:p-6 hover:border-amber-500/40 transition-all cursor-pointer select-none flex flex-col gap-2 overflow-x-hidden break-all"
+                  className="group relative w-full min-w-0 max-w-full mx-auto rounded-[1.25rem] md:rounded-[1.75rem] border border-zinc-700/80 bg-zinc-950/60 p-4 md:p-6 hover:border-zinc-600/80 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all opacity-90 saturate-[0.85] hover:opacity-95 hover:saturate-100"
+                  style={{
+                    backgroundImage: "repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(255,255,255,0.02) 6px, rgba(255,255,255,0.02) 12px)",
+                  }}
                 >
-                {/* 상단: 카테고리 + 사건 번호 + 메뉴 */}
-                <div className="flex items-start justify-between mb-4 text-[11px] text-zinc-500">
-                  <div className="flex items-center gap-2">
+                {/* [판결 완료] 도장 스탬프 — 우측 상단 비스듬히 */}
+                <div
+                  className="absolute top-4 right-4 md:top-5 md:right-5 z-10 pointer-events-none select-none"
+                  style={{ transform: "rotate(12deg)" }}
+                >
+                  <span className="inline-block px-2 py-1 md:px-2.5 md:py-1.5 border-2 border-red-600/90 text-red-500/95 text-[10px] md:text-xs font-black tracking-widest rounded shadow-md bg-black/20">
+                    [ 판 결 완 료 ]
+                  </span>
+                </div>
+
+                {/* 상단: 카테고리(좌) + 사건번호·메뉴(우측) */}
+                <div className="flex items-center justify-between mb-2 text-[11px] text-zinc-500">
+                  <div className="flex items-center gap-2 shrink-0">
                     {p.category ? (
-                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-900/80 border border-zinc-800 text-zinc-400">
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-800/80 border border-zinc-700 text-zinc-500">
                         {p.category}
                       </span>
                     ) : null}
+                  </div>
+                  <div className="flex items-center gap-0.5 shrink-0">
                     {p.case_number != null ? (
-                      <span className="text-[10px] font-semibold text-amber-400">
+                      <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-zinc-400 whitespace-nowrap leading-none">
                         사건 번호 {p.case_number}
                       </span>
                     ) : null}
-                  </div>
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPostMenuOpenId((prev) => (prev === p.id ? null : p.id));
-                      }}
-                      className="px-1 text-zinc-500 hover:text-zinc-300"
-                      aria-label="메뉴"
-                    >
-                      ⋯
-                    </button>
-                    {postMenuOpenId === p.id ? (
-                      <div className="absolute right-0 mt-1 w-32 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            sharePost(p.id, p.title);
-                          }}
-                          className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
-                        >
-                          공유하기
-                        </button>
-                        {isOperatorLoggedIn ? (
+                    <div className="relative" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPostMenuOpenId((prev) => (prev === p.id ? null : p.id));
+                        }}
+                        className="p-0.5 text-zinc-500 hover:text-zinc-300"
+                        aria-label="메뉴"
+                      >
+                        ⋯
+                      </button>
+                      {postMenuOpenId === p.id ? (
+                        <div className="absolute right-0 mt-1 w-40 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
                           <button
                             type="button"
-                            onClick={async (e) => {
+                            onClick={(e) => {
                               e.stopPropagation();
-                              if (!confirm("이 글을 삭제하시겠습니까?")) return;
-                              try {
-                                const r = await fetch(`/api/admin/delete?type=post&id=${p.id}`, { method: "DELETE" });
-                                if (r.ok) {
-                                  setRecentPosts((prev) => prev.filter((x) => x.id !== p.id));
-                                  setTopGuiltyPost((prev) => (prev?.id === p.id ? null : prev));
-                                  window.location.reload();
-                                }
-                              } catch (err) {
-                                console.error("삭제 실패:", err);
-                              }
-                              setPostMenuOpenId(null);
+                              sharePost(p.id, p.title);
                             }}
-                            className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
+                            className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
                           >
-                            ⚖️ 삭제
+                            공유하기
                           </button>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeletePostId(p.id);
-                                setPostMenuOpenId(null);
-                              }}
-                              className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
-                            >
-                              판결문 삭제
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openReportModal("post", p.id);
-                                setPostMenuOpenId(null);
-                              }}
-                              className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
-                            >
-                              신고하기
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    ) : null}
+                          {isOperatorLoggedIn ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (!confirm("이 작성자를 차단하시겠습니까? (해당 IP는 글/댓글 작성, 투표, 발도장이 제한됩니다)")) return;
+                                  try {
+                                    const r = await fetch("/api/admin/block", {
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ targetType: "post", id: p.id }),
+                                    });
+                                    if (!r.ok) {
+                                      const data = await r.json().catch(() => null);
+                                      alert(data?.error || "차단에 실패했습니다.");
+                                    } else {
+                                      alert("작성자가 차단되었습니다.");
+                                    }
+                                  } catch (err) {
+                                    console.error("작성자 차단 실패:", err);
+                                    alert("차단 중 오류가 발생했습니다.");
+                                  } finally {
+                                    setPostMenuOpenId(null);
+                                  }
+                                }}
+                                className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
+                              >
+                                👮 작성자 차단
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (!confirm("이 글을 삭제하시겠습니까?")) return;
+                                  try {
+                                    const r = await fetch(`/api/admin/delete?type=post&id=${p.id}`, { method: "DELETE" });
+                                    if (r.ok) {
+                                      setRecentPosts((prev) => prev.filter((x) => x.id !== p.id));
+                                      setTopGuiltyPost((prev) => (prev?.id === p.id ? null : prev));
+                                      window.location.reload();
+                                    }
+                                  } catch (err) {
+                                    console.error("삭제 실패:", err);
+                                  } finally {
+                                    setPostMenuOpenId(null);
+                                  }
+                                }}
+                                className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
+                              >
+                                ⚖️ 삭제
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeletePostId(p.id);
+                                  setPostMenuOpenId(null);
+                                }}
+                                className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
+                              >
+                                판결문 삭제
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openReportModal("post", p.id);
+                                  setPostMenuOpenId(null);
+                                }}
+                                className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
+                              >
+                                신고하기
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
 
                 {/* 제목 + 내용 요약 */}
-                <div className="mb-2">
-                  <h4 className="text-base md:text-lg font-bold group-hover:text-amber-400 transition line-clamp-1 text-left break-all">
+                <div className="mb-2 pr-16">
+                  <h4 className="text-base md:text-lg font-bold text-zinc-300 group-hover:text-amber-400/90 transition line-clamp-1 text-left break-all">
                     {p.title}
                   </h4>
                   {p.content ? (
-                    <p className="text-[11px] text-zinc-400 line-clamp-2 text-left break-all">
+                    <p className="text-[11px] text-zinc-500 line-clamp-2 text-left break-all">
                       {p.content}
                     </p>
                   ) : null}
                 </div>
 
-                {/* 하단 정보 */}
-                <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2 mt-1">
+                {/* 원고·피고 (그레이스케일 톤) */}
+                <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2">
                   {p.plaintiff === "익명" && p.defendant === "익명" ? (
                     <span>익명</span>
                   ) : (
@@ -3021,43 +3125,64 @@ function HomeContent() {
                     </>
                   )}
                 </div>
-                <p className="text-[11px] text-zinc-500 mb-2 text-center">재판 종료</p>
-                
-                {/* 투표 현황 (작은 막대 그래프 + 배지) */}
-                {(() => {
-                  const total = p.guilty + p.not_guilty;
-                  const guiltyPct = total ? Math.round((p.guilty / total) * 100) : 0;
-                  const notGuiltyPct = total ? Math.round((p.not_guilty / total) * 100) : 0;
-                  const verdictText = typeof p.verdict === "string" ? p.verdict : "";
-                  const isDefense =
-                    p.trial_type === "DEFENSE" ||
-                    (verdictText.includes("원고 무죄") && p.trial_type !== "ACCUSATION");
-                    return (
-                      <div className="mt-auto space-y-1.5">
-                        <div className="flex items-center justify-between text-[10px] text-zinc-500">
-                          <span className="text-red-400 text-xs md:text-sm">유죄 {guiltyPct}% ({p.guilty}표)</span>
-                          <span className="text-blue-400 text-xs md:text-sm">무죄 {notGuiltyPct}% ({p.not_guilty}표)</span>
-                        </div>
-                        <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden flex">
-                          <div
-                            className="bg-red-500 h-full"
-                            style={{ width: `${guiltyPct}%` }}
-                          />
-                          <div
-                            className="bg-blue-500 h-full"
-                            style={{ width: `${notGuiltyPct}%` }}
-                          />
-                        </div>
-                        <div className="flex items-center justify-center gap-2 text-[10px]">
-                          <span className={`px-2 py-0.5 rounded-full font-bold ${isDefense ? "bg-blue-500/20 text-blue-300" : "bg-red-500/20 text-red-300"}`}>
-                            {isDefense ? "무죄 우세" : "유죄 우세"}
-                          </span>
-                        </div>
+
+                {/* 최종 스코어 보드 — 하단 전체 폭 바 + AI 대법관 확정 라벨 (0%인 쪽은 렌더 안 함 → 색 섞임 방지) */}
+                <div className="mt-auto space-y-2">
+                  <div className="w-full h-3 md:h-4 bg-zinc-800 rounded-full overflow-hidden flex">
+                    {guiltyPct > 0 ? (
+                      <div
+                        className="bg-red-600/90 h-full min-w-0 flex items-center justify-end pr-1 shrink-0"
+                        style={{ width: `${guiltyPct}%` }}
+                      >
+                        {guiltyPct >= 50 ? (
+                          <span className="text-[9px] md:text-[10px] font-bold text-red-200/90 whitespace-nowrap">AI 대법관 최종 확정</span>
+                        ) : null}
                       </div>
-                    );
-                })()}
+                    ) : null}
+                    {notGuiltyPct > 0 ? (
+                      <div
+                        className="bg-blue-600/90 h-full min-w-0 flex items-center justify-start pl-1 shrink-0"
+                        style={{ width: `${notGuiltyPct}%` }}
+                      >
+                        {notGuiltyPct >= 50 ? (
+                          <span className="text-[9px] md:text-[10px] font-bold text-blue-200/90 whitespace-nowrap">AI 대법관 최종 확정</span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-zinc-500">
+                    <span className="text-red-400/80">유죄 {guiltyPct}% ({p.guilty}표)</span>
+                    <span className="text-blue-400/80">무죄 {notGuiltyPct}% ({p.not_guilty}표)</span>
+                  </div>
+                </div>
+
+                {/* 하단 버튼: 판결문 전문 보기 / 나도 사연 올리기 */}
+                <div className="flex flex-col sm:flex-row gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedPost(p);
+                    }}
+                    className="flex-1 rounded-xl border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-4 py-2.5 text-xs md:text-sm font-bold transition"
+                  >
+                    AI 판결문 전문 보기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsMobileMenuOpen(false);
+                      openAccuse();
+                    }}
+                    className="flex-1 rounded-xl border border-zinc-600 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 px-4 py-2.5 text-xs md:text-sm font-bold transition"
+                  >
+                    나도 사연 올리기
+                  </button>
+                </div>
                 </article>
-              ))}
+                );
+              })}
             </div>
             {/* 더보기 버튼 */}
             {completedPosts.length > 2 ? (
@@ -3074,11 +3199,11 @@ function HomeContent() {
             ) : null}
             </section>
 
-            {/* 명예의 전당 — 연도/주차별 금주의 개판 1위 */}
+            {/* 명예의 전당 — 연도/주차별 오늘의 개판 1위 */}
             <section ref={hallOfFameRef} className="py-12 md:py-16 scroll-mt-32 border-t border-zinc-900 mt-8 md:mt-12">
               <div className="mb-8 md:mb-10">
                 <h3 className="text-2xl sm:text-3xl md:text-4xl font-black mb-2">명예의 전당</h3>
-                <p className="text-zinc-500 text-xs sm:text-sm">매주 '금주의 개판' 1위로 선정된 사건입니다.</p>
+                <p className="text-zinc-500 text-xs sm:text-sm">매주 &apos;오늘의 개판&apos; 1위로 선정된 사건입니다.</p>
               </div>
               <div className="bg-zinc-900 border border-zinc-800 rounded-[2rem] p-4 md:p-6 lg:p-8">
                 {weeklyWinners.length === 0 ? (
@@ -3153,11 +3278,16 @@ function HomeContent() {
                   <ul className="space-y-2 font-mono text-xs">
                     {courtLogs.map((log) => {
                       const date = new Date(log.created_at);
+                      const dateStr = date.toLocaleDateString("ko-KR", {
+                        year: "2-digit",
+                        month: "2-digit",
+                        day: "2-digit",
+                      });
                       const timeStr = date.toLocaleTimeString("ko-KR", { 
                         hour: "2-digit", 
                         minute: "2-digit", 
                         second: "2-digit",
-                        hour12: false 
+                        hour12: false, 
                       });
                       const isGuilty = log.vote_type === "guilty";
                       return (
@@ -3172,7 +3302,7 @@ function HomeContent() {
                             animation: "slideUp 0.3s ease-out",
                           }}
                         >
-                          <span className="text-zinc-500 text-[10px] mr-2">[{timeStr}]</span>
+                          <span className="text-zinc-500 text-[10px] mr-2">[{dateStr} {timeStr}]</span>
                           <span className="text-zinc-500">{log.nickname}님이</span>
                           {log.post_title ? (
                             <>
@@ -3271,11 +3401,16 @@ function HomeContent() {
                 <ul className="space-y-2 font-mono text-xs">
                   {courtLogs.map((log) => {
                     const date = new Date(log.created_at);
+                    const dateStr = date.toLocaleDateString("ko-KR", {
+                      year: "2-digit",
+                      month: "2-digit",
+                      day: "2-digit",
+                    });
                     const timeStr = date.toLocaleTimeString("ko-KR", { 
                       hour: "2-digit", 
                       minute: "2-digit", 
                       second: "2-digit",
-                      hour12: false 
+                      hour12: false, 
                     });
                     const isGuilty = log.vote_type === "guilty";
                     return (
@@ -3293,7 +3428,7 @@ function HomeContent() {
                           animation: "slideUp 0.3s ease-out",
                         }}
                       >
-                        <span className="text-zinc-500 text-[10px] mr-2">[{timeStr}]</span>
+                        <span className="text-zinc-500 text-[10px] mr-2">[{dateStr} {timeStr}]</span>
                         <span className="text-zinc-500">{log.nickname}님이</span>
                         {log.post_title ? (
                           <>
@@ -3336,13 +3471,20 @@ function HomeContent() {
           <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-zinc-800 bg-zinc-950 shadow-[0_0_60px_rgba(0,0,0,0.8)]">
             <div className="sticky top-0 z-10 flex items-center justify-between gap-4 px-3 py-4 md:p-6 border-b border-zinc-800 bg-zinc-950">
               <h3 className="text-lg font-black text-amber-500">판결문 상세</h3>
-              <button
-                type="button"
-                onClick={() => setSelectedPost(null)}
-                className="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-800 transition"
-              >
-                닫기
-              </button>
+              <div className="flex items-center gap-2">
+                {selectedPost.case_number != null ? (
+                  <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-zinc-400 whitespace-nowrap leading-none rounded-full border border-zinc-700/80 bg-zinc-900/60">
+                    사건 번호 {selectedPost.case_number}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setSelectedPost(null)}
+                  className="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-800 transition"
+                >
+                  닫기
+                </button>
+              </div>
             </div>
             <div className="px-3 py-4 space-y-6 md:p-6">
               {(() => {
@@ -3413,9 +3555,6 @@ function HomeContent() {
                         </div>
                         <h4 className="text-lg sm:text-xl md:text-2xl font-bold text-zinc-100 break-words">{selectedPost.title}</h4>
                       </div>
-                      <span className="text-xs font-black tracking-widest uppercase text-zinc-500 shrink-0">
-                        사건 번호 {selectedPost.case_number != null ? selectedPost.case_number : "—"}
-                      </span>
                     </div>
                     
                     {/* 판결 완료 시 승소/패소 UI */}
@@ -3509,7 +3648,7 @@ function HomeContent() {
                     ⋯
                   </button>
                   {postMenuOpenId === selectedPost.id ? (
-                    <div className="absolute right-0 mt-1 w-32 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
+                    <div className="absolute right-0 mt-1 w-40 rounded-md border border-zinc-800 bg-zinc-900 py-1 text-[11px] text-zinc-200 shadow-lg z-20">
                       <button
                         type="button"
                         onClick={() => sharePost(selectedPost.id, selectedPost.title)}
@@ -3518,27 +3657,57 @@ function HomeContent() {
                         공유하기
                       </button>
                       {isOperatorLoggedIn ? (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (!confirm("이 글을 삭제하시겠습니까?")) return;
-                            try {
-                              const r = await fetch(`/api/admin/delete?type=post&id=${selectedPost.id}`, {
-                                method: "DELETE",
-                              });
-                              if (r.ok) {
-                                setSelectedPost(null);
-                                window.location.reload();
+                        <>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!confirm("이 작성자를 차단하시겠습니까? (해당 IP는 글/댓글 작성, 투표, 발도장이 제한됩니다)")) return;
+                              try {
+                                const r = await fetch("/api/admin/block", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ targetType: "post", id: selectedPost.id }),
+                                });
+                                if (!r.ok) {
+                                  const data = await r.json().catch(() => null);
+                                  alert(data?.error || "차단에 실패했습니다.");
+                                } else {
+                                  alert("작성자가 차단되었습니다.");
+                                }
+                              } catch (err) {
+                                console.error("작성자 차단 실패:", err);
+                                alert("차단 중 오류가 발생했습니다.");
+                              } finally {
+                                setPostMenuOpenId(null);
                               }
-                            } catch (err) {
-                              console.error("삭제 실패:", err);
-                            }
-                            setPostMenuOpenId(null);
-                          }}
-                          className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
-                        >
-                          ⚖️ 삭제
-                        </button>
+                            }}
+                            className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
+                          >
+                            👮 작성자 차단
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!confirm("이 글을 삭제하시겠습니까?")) return;
+                              try {
+                                const r = await fetch(`/api/admin/delete?type=post&id=${selectedPost.id}`, {
+                                  method: "DELETE",
+                                });
+                                if (r.ok) {
+                                  setSelectedPost(null);
+                                  window.location.reload();
+                                }
+                              } catch (err) {
+                                console.error("삭제 실패:", err);
+                              } finally {
+                                setPostMenuOpenId(null);
+                              }
+                            }}
+                            className="block w-full px-3 py-1.5 text-left text-red-300 hover:bg-zinc-800"
+                          >
+                            ⚖️ 삭제
+                          </button>
+                        </>
                       ) : (
                         <>
                           <button
@@ -3547,6 +3716,7 @@ function HomeContent() {
                               setEditPostId(selectedPost.id);
                               setEditTitle(selectedPost.title);
                               setEditContent(selectedPost.content ?? "");
+                              setEditCategory(selectedPost.category ?? "");
                               setEditPassword("");
                               setEditError(null);
                               setPostMenuOpenId(null);

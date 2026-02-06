@@ -12,6 +12,21 @@ function getIp(request: Request): string {
   );
 }
 
+async function isBlockedIp(ip: string) {
+  if (!ip || ip === "unknown") return false;
+  const supabase = createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("blocked_ips")
+    .select("id")
+    .eq("ip_address", ip)
+    .maybeSingle();
+  if (error) {
+    console.error("[GAEPAN] blocked_ips check error (petition agree):", error);
+    return false;
+  }
+  return !!data;
+}
+
 /** POST: 청원 동의하기 */
 export async function POST(
   request: Request,
@@ -24,6 +39,14 @@ export async function POST(
     }
 
     const ip = getIp(request);
+
+    if (await isBlockedIp(ip)) {
+      return NextResponse.json(
+        { error: "차단된 사용자입니다. 청원에 동의할 수 없습니다." },
+        { status: 403 },
+      );
+    }
+
     const supabase = createSupabaseServerClient();
 
     // 이미 동의했는지 확인

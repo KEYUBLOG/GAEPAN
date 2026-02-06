@@ -1,0 +1,18 @@
+# 의존성 및 빌드 결과물 (메모리 사용량 급감)
+node_modules/
+.next/
+.vercel/
+out/
+build/
+
+# 설정 및 환경 변수
+.env*
+.git/
+
+# 로그 및 캐시
+*.log
+.eslintcache
+.cache/
+
+# SQL 파일 (필요 없다면 제외, 크기가 크면 넣으세요)
+*.sql

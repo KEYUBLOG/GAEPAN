@@ -83,7 +83,7 @@ export async function DELETE(
   }
 }
 
-/** PATCH: 판결문 수정 (기소 시 설정한 비밀번호로만 수정 가능, title/content만 변경) */
+/** PATCH: 판결문 수정 (제목, 본문, 카테고리) — 기소 시 설정한 비밀번호로만 수정 가능 */
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -97,12 +97,12 @@ export async function PATCH(
     const body = (await request.json().catch((e) => {
       console.error("[PATCH /api/posts/[id]] request.json error:", e);
       return null;
-    })) as { password?: string; title?: string; content?: string } | null;
+    })) as { password?: string; title?: string; content?: string; category?: string | null } | null;
 
     const rawPassword = typeof body?.password === "string" ? body.password.trim() : "";
     if (!rawPassword) {
       return NextResponse.json(
-        { ok: false, error: "판결문 수정 및 삭제 비밀번호를 입력해 주세요." },
+        { ok: false, error: "비밀번호를 입력해 주세요." },
         { status: 400 },
       );
     }
@@ -126,7 +126,7 @@ export async function PATCH(
 
     if (!post.delete_password) {
       return NextResponse.json(
-        { ok: false, error: "비밀번호가 설정되지 않은 판결문입니다." },
+        { ok: false, error: "수정 비밀번호가 설정되지 않은 판결문입니다." },
         { status: 400 },
       );
     }
@@ -139,15 +139,17 @@ export async function PATCH(
       );
     }
 
-    const updates: { title?: string; content?: string } = {};
-    if (typeof body?.title === "string") updates.title = body.title.trim();
-    if (typeof body?.content === "string") updates.content = body.content;
+    const title = typeof body?.title === "string" ? body.title.trim() : undefined;
+    const content = typeof body?.content === "string" ? body.content : undefined;
+    const category = body?.category === null || body?.category === "" ? null : (typeof body?.category === "string" ? body.category.trim() : undefined);
+
+    const updates: Record<string, unknown> = {};
+    if (title !== undefined) updates.title = title;
+    if (content !== undefined) updates.content = content;
+    if (category !== undefined) updates.category = category || null;
 
     if (Object.keys(updates).length === 0) {
-      return NextResponse.json(
-        { ok: false, error: "수정할 제목 또는 내용을 입력해 주세요." },
-        { status: 400 },
-      );
+      return NextResponse.json({ ok: false, error: "수정할 항목이 없습니다." }, { status: 400 });
     }
 
     const { error: updateErr } = await supabase

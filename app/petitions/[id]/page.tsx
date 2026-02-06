@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { Logo } from "@/app/components/Logo";
 import { useRouter } from "next/navigation";
 
 type Petition = {
@@ -286,9 +287,7 @@ export default function PetitionDetailPage({ params }: { params: Promise<{ id: s
       ) : null}
       {/* 네비게이션 */}
       <nav className="p-6 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50">
-        <Link href="/" className="text-2xl font-black tracking-tighter text-amber-500 italic">
-          GAEPAN
-        </Link>
+        <Logo />
         <Link
           href="/petitions"
           className="text-sm font-bold text-zinc-400 hover:text-amber-500 transition"
