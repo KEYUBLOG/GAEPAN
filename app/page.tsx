@@ -1840,7 +1840,7 @@ function HomeContent() {
         </div>
       ) : null}
       {/* GNB (상단바) */}
-      <nav className="px-4 py-3 md:p-6 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50">
+      <nav className="px-4 py-3 md:py-6 md:px-16 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50">
         <Logo className="pr-2" />
         
         {/* 우측 상단 메뉴 버튼 (모바일/PC 공통) */}
@@ -1949,7 +1949,7 @@ function HomeContent() {
       ) : null}
 
       {/* 실시간 사법 전광판 */}
-      <div className="max-w-7xl mx-auto px-4 md:px-8 mt-4 md:mt-6 mb-4">
+      <div className="max-w-6xl mx-auto px-4 md:px-16 mt-4 md:mt-6 mb-4">
         <div className="bg-black/40 backdrop-blur-md border border-zinc-800/60 rounded-2xl px-4 py-4 md:px-6 md:py-5 shadow-[0_0_30px_rgba(0,0,0,0.6)]">
           <div className="flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-4 mb-3 text-center">
             <h3 className="text-[11px] md:text-xs font-semibold tracking-[0.2em] uppercase text-zinc-400">
@@ -2002,7 +2002,7 @@ function HomeContent() {
       </div>
 
       {/* Main Grid Container — 모바일 16px 패딩, 데스크톱 32px */}
-      <div className="max-w-7xl mx-auto px-4 md:px-8 w-full max-w-[100vw] overflow-x-hidden">
+      <div className="max-w-6xl mx-auto px-4 md:px-16 w-full max-w-[100vw] overflow-x-hidden">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
           {/* Main Content Area */}
           <div className="md:col-span-8 md:pr-6 space-y-12 min-w-0">
