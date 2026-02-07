@@ -2005,7 +2005,7 @@ function HomeContent() {
       <div className="max-w-6xl mx-auto px-4 md:px-16 w-full overflow-x-hidden">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
           {/* Main Content Area */}
-          <div className="md:col-span-8 md:pr-6 space-y-12 min-w-0">
+          <div className="md:col-span-12 space-y-12 min-w-0">
             {/* Hero Section */}
             <main className="pt-6 md:pt-8 pb-12 md:pb-20 text-center">
               <div className="inline-block px-4 py-1.5 mb-3 md:mb-6 text-xs font-bold tracking-widest uppercase bg-zinc-900 border border-zinc-800 rounded-full text-amber-500">
@@ -3251,14 +3251,14 @@ function HomeContent() {
             </section>
           </div>
 
-          {/* Sidebar Area (PC only) */}
-          <aside className="hidden md:block md:col-span-4 md:pl-6 md:pr-0">
+          {/* 실시간 재판소: PC에서도 하단 티커로만 표시 (사이드바 비표시) */}
+          <aside className="hidden md:col-span-4 md:pl-6 md:pr-0">
             {/* 실시간 재판소 — 법정 기록 로그 창 */}
-            <section className="sticky top-24 py-8 flex flex-col h-[calc(100vh-120px)]">
+            <section className="sticky top-24 pt-4 md:pt-6 pb-8 flex flex-col h-[calc(100vh-120px)]">
               <div className="flex justify-between items-end mb-4">
                 <div>
                   <h3 className="text-lg md:text-xl font-black mb-1">실시간 재판소</h3>
-                  <p className="text-zinc-500 text-xs sm:text-sm">정의는 멈추지 않는다, 지금 이 순간의 판결</p>
+                  <p className="text-zinc-500 text-[11px] sm:text-[13px]">정의는 멈추지 않는다, 지금 이 순간의 판결</p>
                 </div>
                 <div className="flex items-center gap-2 text-amber-500 font-bold text-xs">
                   <span className="relative flex h-2 w-2">
@@ -3333,8 +3333,8 @@ function HomeContent() {
         </div>
       </div>
 
-      {/* 모바일: 실시간 재판소 하단 티커 */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t-4 border-amber-500/30 bg-zinc-900/95 backdrop-blur">
+      {/* 실시간 재판소 하단 티커 (모바일·PC 공통) */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 border-t-4 border-amber-500/30 bg-zinc-900/95 backdrop-blur">
         <button
           type="button"
           onClick={() => setIsMobileLogOpen(true)}
@@ -3358,9 +3358,9 @@ function HomeContent() {
         </button>
       </div>
 
-      {/* 모바일: 실시간 재판소 Slide-up 레이어 */}
+      {/* 실시간 재판소 Slide-up 레이어 (모바일·PC 공통) */}
       {isMobileLogOpen ? (
-        <div className="md:hidden fixed inset-0 z-[200] flex flex-col">
+        <div className="fixed inset-0 z-[200] flex flex-col">
           {/* 배경 오버레이 */}
           <button
             type="button"
@@ -3374,7 +3374,7 @@ function HomeContent() {
             <div className="flex items-center justify-between p-4 border-b border-zinc-800">
               <div>
                 <h3 className="text-lg font-black mb-1">실시간 재판소</h3>
-                <p className="text-zinc-500 text-xs">정의는 멈추지 않는다, 지금 이 순간의 판결</p>
+                <p className="text-zinc-500 text-[11px]">정의는 멈추지 않는다, 지금 이 순간의 판결</p>
               </div>
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2 text-amber-500 font-bold text-xs">
