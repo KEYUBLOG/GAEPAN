@@ -2002,7 +2002,7 @@ function HomeContent() {
       </div>
 
       {/* Main Grid Container — 모바일 16px 패딩, 데스크톱 32px */}
-      <div className="max-w-6xl mx-auto px-4 md:px-16 w-full max-w-[100vw] overflow-x-hidden">
+      <div className="max-w-6xl mx-auto px-4 md:px-16 w-full overflow-x-hidden">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
           {/* Main Content Area */}
           <div className="md:col-span-8 md:pr-6 space-y-12 min-w-0">
