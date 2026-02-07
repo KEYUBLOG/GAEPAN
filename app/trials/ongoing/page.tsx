@@ -4,6 +4,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { Logo } from "@/app/components/Logo";
+import { CoupangBanner } from "@/app/components/CoupangBanner";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 const TRIAL_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -1438,6 +1439,10 @@ export default function OngoingTrialsPage() {
                   )}
                 </div>
               </section>
+
+              <div className="mt-6">
+                <CoupangBanner href="https://link.coupang.com/a/dHLvG2" />
+              </div>
 
               <div className="my-6 border-t border-dashed border-zinc-700" />
 

@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { Logo } from "@/app/components/Logo";
+import { CoupangBanner } from "@/app/components/CoupangBanner";
 import { Noto_Serif_KR } from "next/font/google";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -1293,6 +1294,10 @@ export default function HallOfFamePage() {
                   )}
                 </div>
               </section>
+
+              <div className="mt-6">
+                <CoupangBanner href="https://link.coupang.com/a/dHLvG2" />
+              </div>
 
               <div className="my-6 border-t border-dashed border-zinc-700" />
 

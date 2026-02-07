@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
+import { InterstitialAd } from "@/app/components/InterstitialAd";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -61,6 +62,10 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased overflow-x-hidden`}
       >
         {children}
+        <InterstitialAd
+          imageUrl="/interstitial-ad.png"
+          linkUrl="https://link.coupang.com/a/dH2kar"
+        />
         <Analytics />
       </body>
     </html>

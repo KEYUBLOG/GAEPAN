@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Logo } from "@/app/components/Logo";
+import { CoupangBanner } from "@/app/components/CoupangBanner";
 import { animate, motion } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -3779,6 +3780,10 @@ function HomeContent() {
                   )}
                 </div>
               </section>
+
+              <div className="mt-6">
+                <CoupangBanner href="https://link.coupang.com/a/dHLvG2" />
+              </div>
 
               <div className="my-6 border-t border-dashed border-zinc-700" />
 

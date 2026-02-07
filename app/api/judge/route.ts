@@ -379,7 +379,7 @@ export async function POST(request: Request) {
     const { data: inserted, error } = await supabase
       .from("posts")
       .insert({
-        title: verdict.title,
+        title: trimmedTitle,
         content: req.details,
         verdict: verdict.verdict,
         verdict_rationale: rationaleToSave,
