@@ -50,8 +50,8 @@ export function InterstitialAd({
       <div className="relative w-full max-w-sm max-h-[90dvh] flex flex-col overflow-y-auto overflow-x-hidden bg-white shadow-xl rounded-lg">
         {/* TOP: 헤드라인 + 닫기 */}
         <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-2">
-          <p className="text-base font-semibold text-zinc-800 leading-snug flex-1 min-w-0">
-            사연 재판 끝! 이제 배심원님도 쉬어야죠.
+          <p className="text-[15px] font-semibold text-zinc-800 leading-snug flex-1 min-w-0">
+            사연 읽느라 굳어버린 몸, 그대로 잠들 건가요?
           </p>
           <button
             type="button"
@@ -78,8 +78,8 @@ export function InterstitialAd({
         </div>
 
         {/* BOTTOM: 서브 카피 */}
-        <p className="px-5 pt-4 pb-2 text-sm text-zinc-600 leading-relaxed">
-          답답한 고구마 속 뻥 뚫어줄 히노끼 입욕제 ♨️
+        <p className="px-5 pt-4 pb-2 text-[13px] text-zinc-600 leading-relaxed">
+          집에서 즐기는 정통 온천의 향, 바스로망 히노끼 입욕제 ♨️
         </p>
 
         {/* FOOTER: CTA 버튼 */}
