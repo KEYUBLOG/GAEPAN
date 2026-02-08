@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Logo } from "@/app/components/Logo";
 import { CoupangBanner } from "@/app/components/CoupangBanner";
+import { StoryShareCard } from "@/app/components/StoryShareCard";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 const TRIAL_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -158,6 +159,7 @@ function OngoingTrialsContent() {
   const commentDeletePasswordRef = React.useRef<HTMLInputElement | null>(null);
   const deletePasswordRef = React.useRef<HTMLInputElement | null>(null);
   const verdictDetailRef = React.useRef<HTMLDivElement | null>(null);
+  const storyCardRef = React.useRef<HTMLDivElement | null>(null);
 
   // 투표 저장/로드
   // localStorage 투표 상태를 userVotes에 동기화 (다른 페이지에서 투표한 것도 유지)
@@ -1316,6 +1318,45 @@ function OngoingTrialsContent() {
                             }
                           </p>
                         </div>
+                        <div className="fixed left-[-9999px] top-0 z-[-1] opacity-0 pointer-events-none">
+                          <StoryShareCard
+                            ref={storyCardRef}
+                            title={selectedPost.title}
+                            isAuthorVictory={isAuthorVictory}
+                            guiltyPct={guiltyPct}
+                            notGuiltyPct={notGuiltyPct}
+                            authorName={authorName}
+                            trialType={selectedPost.trial_type}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!storyCardRef.current) return;
+                            try {
+                              const html2canvas = (await import("html2canvas")).default;
+                              const canvas = await html2canvas(storyCardRef.current, { scale: 3, backgroundColor: "#0a0a0a", useCORS: true, logging: false });
+                              canvas.toBlob(async (blob) => {
+                                if (!blob) return;
+                                const file = new File([blob], "gaepan-story.png", { type: "image/png" });
+                                if (typeof navigator !== "undefined" && navigator.share && navigator.canShare?.({ files: [file] })) {
+                                  await navigator.share({ files: [file], title: "개판 판결문" });
+                                } else {
+                                  const a = document.createElement("a");
+                                  a.href = URL.createObjectURL(blob);
+                                  a.download = "gaepan-story.png";
+                                  a.click();
+                                  URL.revokeObjectURL(a.href);
+                                }
+                              }, "image/png");
+                            } catch (err) {
+                              console.error("스토리 카드 캡처 실패:", err);
+                            }
+                          }}
+                          className="w-full mt-4 py-3 rounded-xl border-2 border-amber-500/50 bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 font-bold text-sm transition"
+                        >
+                          스토리에 공유하기
+                        </button>
                       </div>
                     ) : (
                       /* 진행 중일 때: 재판 남은 시간 */

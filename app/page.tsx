@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { Logo } from "@/app/components/Logo";
 import { CoupangBanner } from "@/app/components/CoupangBanner";
 import { CoupangLinkBanner } from "@/app/components/CoupangLinkBanner";
+import { StoryShareCard } from "@/app/components/StoryShareCard";
 import { animate, motion } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -333,6 +334,7 @@ function HomeContent() {
   const commentDeletePasswordRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const verdictDetailRef = useRef<HTMLDivElement | null>(null);
+  const storyCardRef = useRef<HTMLDivElement | null>(null);
 
   // 사이트 전체: 우클릭·드래그·텍스트 선택(스크랩) 금지
   useEffect(() => {
@@ -3645,6 +3647,52 @@ function HomeContent() {
                             }
                           </p>
                         </div>
+                        {/* 스토리 공유용 카드 (캡처용, 화면 밖) */}
+                        <div className="fixed left-[-9999px] top-0 z-[-1] opacity-0 pointer-events-none">
+                          <StoryShareCard
+                            ref={storyCardRef}
+                            title={selectedPost.title}
+                            isAuthorVictory={isAuthorVictory}
+                            guiltyPct={guiltyPct}
+                            notGuiltyPct={notGuiltyPct}
+                            authorName={authorName}
+                            trialType={selectedPost.trial_type}
+                          />
+                        </div>
+                        {/* 스토리에 공유하기 버튼 */}
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!storyCardRef.current) return;
+                            try {
+                              const html2canvas = (await import("html2canvas")).default;
+                              const canvas = await html2canvas(storyCardRef.current, {
+                                scale: 3,
+                                backgroundColor: "#0a0a0a",
+                                useCORS: true,
+                                logging: false,
+                              });
+                              canvas.toBlob(async (blob) => {
+                                if (!blob) return;
+                                const file = new File([blob], "gaepan-story.png", { type: "image/png" });
+                                if (typeof navigator !== "undefined" && navigator.share && navigator.canShare?.({ files: [file] })) {
+                                  await navigator.share({ files: [file], title: "개판 판결문" });
+                                } else {
+                                  const a = document.createElement("a");
+                                  a.href = URL.createObjectURL(blob);
+                                  a.download = "gaepan-story.png";
+                                  a.click();
+                                  URL.revokeObjectURL(a.href);
+                                }
+                              }, "image/png");
+                            } catch (err) {
+                              console.error("스토리 카드 캡처 실패:", err);
+                            }
+                          }}
+                          className="w-full mt-4 py-3 rounded-xl border-2 border-amber-500/50 bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 font-bold text-sm transition"
+                        >
+                          스토리에 공유하기
+                        </button>
                       </div>
                     ) : (
                       /* 진행 중일 때: 재판 남은 시간 */
