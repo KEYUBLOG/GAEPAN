@@ -288,7 +288,7 @@ function HomeContent() {
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [deleteToast, setDeleteToast] = useState<{ message: string; isError?: boolean } | null>(null);
   const [trialTab, setTrialTab] = useState<"ongoing" | "completed">("ongoing");
-  const [ongoingSort, setOngoingSort] = useState<"latest" | "votes" | "urgent">("urgent");
+  const [ongoingSort, setOngoingSort] = useState<"latest" | "votes" | "urgent">("latest");
   const [completedSort, setCompletedSort] = useState<"latest" | "votes">("latest");
   const [liveFeedItems, setLiveFeedItems] = useState<Array<{
     id: string;

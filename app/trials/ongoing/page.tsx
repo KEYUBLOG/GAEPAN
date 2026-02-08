@@ -85,7 +85,7 @@ function OngoingTrialsContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>("전체");
-  const [sort, setSort] = useState<"latest" | "votes" | "urgent">("urgent");
+  const [sort, setSort] = useState<"latest" | "votes" | "urgent">("latest");
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
   const [selectedPost, setSelectedPost] = useState<PostPreview | null>(null);
   const [votingId, setVotingId] = useState<string | null>(null);
