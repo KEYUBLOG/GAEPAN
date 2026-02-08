@@ -834,7 +834,8 @@ function HallOfFameContent() {
                           {p.category}
                         </span>
                       ) : null}
-                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-200 shadow-[0_0_12px_rgba(52,211,153,0.2)]">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-200 shadow-[0_0_12px_rgba(52,211,153,0.2)]">
+                        <span className="text-amber-400" aria-hidden>🏆</span>
                         {year}년 제{week}주
                       </span>
                     </div>

@@ -1559,6 +1559,13 @@ function HomeContent() {
         .animate-slide-up {
           animation: slide-up 0.3s ease-out;
         }
+        @keyframes hall-of-fame-glow {
+          0%, 100% { box-shadow: 0 0 20px rgba(52,211,153,0.2), 0 0 40px rgba(52,211,153,0.08), inset 0 0 20px rgba(0,0,0,0.2); }
+          50% { box-shadow: 0 0 28px rgba(52,211,153,0.35), 0 0 56px rgba(52,211,153,0.12), inset 0 0 20px rgba(0,0,0,0.2); }
+        }
+        .animate-hall-of-fame-glow {
+          animation: hall-of-fame-glow 3s ease-in-out infinite;
+        }
       `}</style>
       <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-amber-500 selection:text-black overflow-x-hidden">
       {/* 삭제 결과 토스트 */}
@@ -2921,7 +2928,8 @@ function HomeContent() {
                       </span>
                     ) : null}
                     {isWinner && weekInfo ? (
-                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-200 shadow-[0_0_12px_rgba(52,211,153,0.2)]">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-200 shadow-[0_0_12px_rgba(52,211,153,0.2)]">
+                        <span className="text-amber-400" aria-hidden>🏆</span>
                         {weekInfo.year}년 제{weekInfo.week}주
                       </span>
                     ) : null}
@@ -3139,7 +3147,7 @@ function HomeContent() {
             ) : null}
             </section>
 
-            {/* 명예의 전당 — 연도/주차별 오늘의 개판 1위 */}
+            {/* 명예의 전당 — 연도/주차별 오늘의 개판 1위 (판결문/속보형 카드) */}
             <section ref={hallOfFameRef} className="py-12 md:py-16 scroll-mt-32 border-t border-zinc-900 mt-8 md:mt-12">
               <div className="mb-8 md:mb-10">
                 <h3 className="text-2xl sm:text-3xl md:text-4xl font-black mb-2">명예의 전당</h3>
@@ -3150,19 +3158,90 @@ function HomeContent() {
                   <p className="text-zinc-500 text-xs sm:text-sm text-center py-8">아직 기록된 주차가 없습니다.</p>
                 ) : (
                   <>
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setSelectedPost(weeklyWinners[0].post)}
-                      onKeyDown={(e) => e.key === "Enter" && setSelectedPost(weeklyWinners[0].post)}
-                      className="block rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 p-4 hover:border-emerald-400/40 transition cursor-pointer shadow-[0_0_16px_rgba(52,211,153,0.12)]"
-                    >
-                      <span className="text-xs font-bold text-emerald-200">
-                        {weeklyWinners[0].year}년 제{weeklyWinners[0].week}주
-                      </span>
-                      <p className="font-bold text-sm sm:text-base text-zinc-100 mt-1 line-clamp-1">{weeklyWinners[0].post.title}</p>
-                      <p className="text-xs text-zinc-500 mt-1">유죄 {weeklyWinners[0].post.guilty}표 · 무죄 {weeklyWinners[0].post.not_guilty}표</p>
-                    </div>
+                    {(() => {
+                      const w = weeklyWinners[0];
+                      const p = w.post;
+                      const totalVotes = p.guilty + p.not_guilty;
+                      const guiltyPct = totalVotes ? Math.round((p.guilty / totalVotes) * 100) : 50;
+                      const notGuiltyPct = totalVotes ? 100 - guiltyPct : 50;
+                      const contentPreview = (typeof p.content === "string" ? p.content : "").trim().replace(/\s+/g, " ").slice(0, 160);
+                      return (
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setSelectedPost(p)}
+                          onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
+                          className="relative overflow-hidden rounded-2xl border-2 border-emerald-500/40 bg-gradient-to-br from-emerald-950/60 via-zinc-900 to-zinc-950 p-5 md:p-6 hover:border-emerald-400/50 transition-all cursor-pointer animate-hall-of-fame-glow"
+                          style={{
+                            backgroundImage: "radial-gradient(ellipse 80% 50% at 50% 0%, rgba(52,211,153,0.08) 0%, transparent 50%), repeating-linear-gradient(-45deg, transparent, transparent 8px, rgba(52,211,153,0.03) 8px, rgba(52,211,153,0.03) 16px)",
+                          }}
+                        >
+                          {/* 워터마크: 천칭 */}
+                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-[0.06]" aria-hidden>
+                            <svg viewBox="0 0 64 64" className="w-32 h-32 md:w-40 md:h-40 text-emerald-400" fill="currentColor">
+                              <path d="M32 8v48M20 24h24M20 40h24M26 24l-6 16h16l-6-16M38 24l-6 16h16l-6-16M32 8l-4 8h8l-4-8z" stroke="currentColor" strokeWidth="2" fill="none" />
+                            </svg>
+                            <span className="absolute text-6xl md:text-7xl text-emerald-400/80 select-none">⚖️</span>
+                          </div>
+
+                          <div className="relative z-10">
+                            {/* 카테고리 + 주차 + 트로피 */}
+                            <div className="flex items-center gap-2 mb-3 flex-wrap">
+                              {p.category ? (
+                                <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-800/80 border border-zinc-700 text-zinc-400">
+                                  {p.category}
+                                </span>
+                              ) : null}
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 shadow-[0_0_12px_rgba(52,211,153,0.2)]">
+                                <span className="text-amber-400" aria-hidden>🏆</span>
+                                {w.year}년 제{w.week}주
+                              </span>
+                            </div>
+
+                            {/* 사연 제목 */}
+                            <h4 className="text-lg md:text-xl lg:text-2xl font-black text-zinc-50 leading-snug mb-3 line-clamp-2 drop-shadow-sm">
+                              {p.title || "제목 없음"}
+                            </h4>
+
+                            {/* 본문 내용 일부 */}
+                            {contentPreview ? (
+                              <div className="rounded-xl border border-zinc-600/80 bg-zinc-800/50 px-3 py-2.5 mb-4">
+                                <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed line-clamp-3 whitespace-pre-wrap break-words">
+                                  {contentPreview}
+                                  {(p.content ?? "").length > 160 ? "…" : ""}
+                                </p>
+                              </div>
+                            ) : null}
+
+                            {/* 유죄 vs 무죄 게이지 바 */}
+                            <div className="mb-3">
+                              <div className="flex h-3 rounded-full overflow-hidden bg-zinc-800 border border-zinc-700/80 shadow-inner">
+                                <div
+                                  className="h-full bg-red-500/90 transition-all duration-500"
+                                  style={{ width: `${guiltyPct}%` }}
+                                />
+                                <div
+                                  className="h-full bg-blue-500/90 transition-all duration-500"
+                                  style={{ width: `${notGuiltyPct}%` }}
+                                />
+                              </div>
+                              <div className="flex justify-between mt-1.5 text-[10px] font-bold">
+                                <span className="text-red-400">유죄 {guiltyPct}% ({p.guilty.toLocaleString()}표)</span>
+                                <span className="text-blue-400">무죄 {notGuiltyPct}% ({p.not_guilty.toLocaleString()}표)</span>
+                              </div>
+                            </div>
+
+                            {/* 참여 인원 강조 */}
+                            <p className="text-xs text-zinc-400 font-semibold">
+                              총 <span className="text-emerald-300 font-black">{totalVotes.toLocaleString()}</span>명의 배심원이 참여한 사건
+                            </p>
+
+                            {/* 배심원 한마디 유도 */}
+                            <p className="mt-2 text-[11px] text-zinc-500">클릭하면 판결문 상세 · 배심원 한마디를 볼 수 있습니다</p>
+                          </div>
+                        </div>
+                      );
+                    })()}
                     {weeklyWinners.length > 1 ? (
                       <div className="mt-6 text-center">
                         <Link
