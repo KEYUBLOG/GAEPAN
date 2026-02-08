@@ -362,9 +362,8 @@ function HomeContent() {
 
         const { data, error } = await supabase
           .from("posts")
-          .select("id, guilty, not_guilty, ratio, trial_type, created_at, voting_ended_at, status")
-          .gte("created_at", fromDate.toISOString())
-          .neq("status", "판결불가");
+          .select("id, guilty, not_guilty, ratio, trial_type, created_at, voting_ended_at")
+          .gte("created_at", fromDate.toISOString());
 
         if (error) throw error;
 
@@ -376,7 +375,6 @@ function HomeContent() {
           trial_type: "DEFENSE" | "ACCUSATION" | null;
           created_at: string | null;
           voting_ended_at: string | null;
-          status?: string | null;
         }>;
 
         // 1) 투표가 이미 끝난 글만
@@ -412,7 +410,13 @@ function HomeContent() {
         setTodayStats({ total, wins, losses });
         setTodayStatsError(null);
       } catch (err) {
-        console.error("[GAEPAN] 오늘 재판 현황 집계 오류:", err);
+        const msg =
+          err instanceof Error
+            ? err.message
+            : (err && typeof err === "object" && "message" in (err as object)
+              ? String((err as { message?: unknown }).message)
+              : JSON.stringify(err));
+        console.error("[GAEPAN] 오늘 재판 현황 집계 오류:", msg, err);
         setTodayStatsError("오늘 재판 현황을 불러오지 못했습니다.");
       }
     };
@@ -3773,8 +3777,15 @@ function HomeContent() {
                 </div>
               </section>
 
-              <div className="mt-6">
-                <CoupangBanner href="https://link.coupang.com/a/dHLvG2" />
+              <div className="mt-6 flex flex-col gap-4">
+                <CoupangBanner href="https://link.coupang.com/a/dHLvG2" hideDisclaimer />
+                <CoupangBanner
+                  href="https://link.coupang.com/a/dIrVHM"
+                  title=""
+                  highlight="'바스로망 히노끼 입욕제'"
+                  suffix="로 "
+                  suffixAfterBr="굳은 몸을 힐링해 보세요."
+                />
               </div>
 
               <div className="my-6 border-t border-dashed border-zinc-700" />

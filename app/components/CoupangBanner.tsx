@@ -6,6 +6,16 @@ const DEFAULT_COUPANG_LINK = "https://link.coupang.com/a/dHLvG2";
 
 type Props = {
   href?: string;
+  /** 첫 줄 문구 (미입력 시 두쫀쿠 기본 문구) */
+  title?: string;
+  /** 강조 상품명 (미입력 시 '두쫀쿠') */
+  highlight?: string;
+  /** 상품명 뒤 문구 (미입력 시 '로 달달하게 보충해 보세요.') */
+  suffix?: string;
+  /** 있으면 모바일에서 이 문구 앞에 줄바꿈 (suffix 다음 줄에 표시) */
+  suffixAfterBr?: string;
+  /** true면 쿠팡 파트너스 문구 숨김 (아래 배너에만 문구 노출할 때 사용) */
+  hideDisclaimer?: boolean;
 };
 
 /** 쇼핑백 아이콘 (24x24) */
@@ -19,8 +29,19 @@ function ShoppingIcon({ className }: { className?: string }) {
   );
 }
 
+const DEFAULT_TITLE = "답답한 사연 읽고 고구마 먹은 기분?";
+const DEFAULT_HIGHLIGHT = "'두쫀쿠'";
+const DEFAULT_SUFFIX = "로 달달하게 보충해 보세요.";
+
 /** 쿠팡 파트너스 배너: 본문과 어울리는 깔끔한 박스, 우측에 흐린 AD 표시 */
-export function CoupangBanner({ href = DEFAULT_COUPANG_LINK }: Props) {
+export function CoupangBanner({
+  href = DEFAULT_COUPANG_LINK,
+  title = DEFAULT_TITLE,
+  highlight = DEFAULT_HIGHLIGHT,
+  suffix = DEFAULT_SUFFIX,
+  suffixAfterBr,
+  hideDisclaimer = false,
+}: Props) {
   return (
     <div className="w-full max-w-md md:max-w-lg">
       <a
@@ -39,10 +60,21 @@ export function CoupangBanner({ href = DEFAULT_COUPANG_LINK }: Props) {
               <ShoppingIcon className="w-3 h-3" />
             </span>
             <span className="text-[12px] font-bold text-white leading-tight">
-              답답한 사연 읽고 고구마 먹은 기분?
-              {' '}
-              <br className="md:hidden" />
-              <span className="text-amber-400 font-extrabold">&apos;두쫀쿠&apos;</span>로 달달하게 보충해 보세요.
+              {title ? (
+                <>
+                  {title}
+                  {' '}
+                  <br className="md:hidden" />
+                </>
+              ) : null}
+              <span className="text-amber-400 font-extrabold">{highlight}</span>
+              {suffix}
+              {suffixAfterBr != null ? (
+                <>
+                  <br className="md:hidden" />
+                  {suffixAfterBr}
+                </>
+              ) : null}
             </span>
           </div>
           <span className="text-[10px] text-zinc-600 font-medium tracking-wider select-none shrink-0" aria-label="광고">
@@ -50,9 +82,11 @@ export function CoupangBanner({ href = DEFAULT_COUPANG_LINK }: Props) {
           </span>
         </div>
       </a>
-      <p className="mt-1.5 text-[8px] md:text-[10px] text-zinc-500 leading-snug" style={{ color: "#666" }}>
-        * 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.
-      </p>
+      {!hideDisclaimer && (
+        <p className="mt-1.5 text-[8px] md:text-[10px] text-zinc-500 leading-snug" style={{ color: "#666" }}>
+          * 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.
+        </p>
+      )}
     </div>
   );
 }
