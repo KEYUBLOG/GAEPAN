@@ -357,26 +357,6 @@ function CompletedTrialsContent() {
     };
   }, [selectedPost?.id]);
 
-  // 카드용 댓글 수
-  const completedPostIds = useMemo(() => filteredPosts.map((p) => p.id), [filteredPosts]);
-  useEffect(() => {
-    if (completedPostIds.length === 0) {
-      setCommentCountsByPostId({});
-      return;
-    }
-    let cancelled = false;
-    fetch(`/api/posts/comment-counts?ids=${completedPostIds.join(",")}`)
-      .then((r) => r.json().catch(() => ({ counts: {} })))
-      .then((data: { counts?: Record<string, number> }) => {
-        if (cancelled) return;
-        setCommentCountsByPostId(data.counts ?? {});
-      })
-      .catch(() => {
-        if (!cancelled) setCommentCountsByPostId({});
-      });
-    return () => { cancelled = true; };
-  }, [completedPostIds.join(",")]);
-
   // 카드에서 댓글 클릭으로 모달 열었을 때 댓글 섹션으로 스크롤
   useEffect(() => {
     if (!selectedPost || !scrollToCommentsOnOpen) return;
@@ -609,6 +589,26 @@ function CompletedTrialsContent() {
     }
     return sorted;
   }, [posts, selectedCategory, sort]);
+
+  // 카드용 댓글 수
+  const completedPostIds = useMemo(() => filteredPosts.map((p) => p.id), [filteredPosts]);
+  useEffect(() => {
+    if (completedPostIds.length === 0) {
+      setCommentCountsByPostId({});
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/posts/comment-counts?ids=${completedPostIds.join(",")}`)
+      .then((r) => r.json().catch(() => ({ counts: {} })))
+      .then((data: { counts?: Record<string, number> }) => {
+        if (cancelled) return;
+        setCommentCountsByPostId(data.counts ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setCommentCountsByPostId({});
+      });
+    return () => { cancelled = true; };
+  }, [completedPostIds.join(",")]);
 
   // 주차별 명예의 전당 1위 (판결 완료 카드 배지용)
   const weeklyWinners = useMemo(() => {
