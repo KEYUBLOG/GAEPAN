@@ -37,7 +37,7 @@ async function isBlockedIp(ip: string): Promise<boolean> {
   return !!data;
 }
 
-const CATEGORIES = ["연애", "직장생활", "가족", "결혼생활", "육아", "친구", "이웃/매너", "사회이슈", "기타"] as const;
+const CATEGORIES = ["연애", "직장생활", "학교생활", "가족", "결혼생활", "육아", "친구", "이웃/매너", "사회이슈", "기타"] as const;
 
 type JudgeRequest = {
   title: string;

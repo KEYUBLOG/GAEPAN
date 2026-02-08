@@ -177,7 +177,7 @@ function HomeContent() {
   } | null>(null);
   const [createdPostId, setCreatedPostId] = useState<string | null>(null);
   const [judgeError, setJudgeError] = useState<string | null>(null);
-  const CATEGORY_OPTIONS = ["연애", "직장생활", "가족", "결혼생활", "육아", "친구", "이웃/매너", "사회이슈", "기타"] as const;
+  const CATEGORY_OPTIONS = ["연애", "직장생활", "학교생활", "가족", "결혼생활", "육아", "친구", "이웃/매너", "사회이슈", "기타"] as const;
   const [form, setForm] = useState({
     title: "",
     details: "",

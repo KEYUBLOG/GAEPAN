@@ -131,7 +131,7 @@ function CompletedTrialsContent() {
   } | null>(null);
   const [createdPostId, setCreatedPostId] = useState<string | null>(null);
   const [judgeError, setJudgeError] = useState<string | null>(null);
-  const CATEGORY_OPTIONS = ["연애", "직장생활", "가족", "결혼생활", "육아", "친구", "이웃/매너", "사회이슈", "기타"] as const;
+  const CATEGORY_OPTIONS = ["연애", "직장생활", "학교생활", "가족", "결혼생활", "육아", "친구", "이웃/매너", "사회이슈", "기타"] as const;
   const [form, setForm] = useState({
     title: "",
     details: "",
@@ -777,7 +777,7 @@ function CompletedTrialsContent() {
         {/* 카테고리 필터 */}
         <div className="sticky top-[4.5rem] z-40 bg-zinc-950/95 backdrop-blur-sm border-b border-zinc-900 py-3 px-4 -mx-6 mb-6">
           <div className="max-w-5xl mx-auto flex flex-wrap justify-center gap-2">
-            {(["전체", "연애", "직장생활", "가족", "결혼생활", "육아", "친구", "이웃/매너", "사회이슈", "기타"] as const).map((cat) => (
+            {(["전체", "연애", "직장생활", "학교생활", "가족", "결혼생활", "육아", "친구", "이웃/매너", "사회이슈", "기타"] as const).map((cat) => (
               <button
                 key={cat}
                 type="button"
