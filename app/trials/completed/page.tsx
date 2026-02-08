@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useEffect, useState, useMemo } from "react";
+import React, { Suspense, useEffect, useState, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Logo } from "@/app/components/Logo";
@@ -134,6 +134,9 @@ function CompletedTrialsContent() {
     id: string | null;
   }>({ type: null, id: null });
   const [reportReason, setReportReason] = useState<string>("욕설/비하");
+  const [commentCountsByPostId, setCommentCountsByPostId] = useState<Record<string, number>>({});
+  const [scrollToCommentsOnOpen, setScrollToCommentsOnOpen] = useState(false);
+  const commentsSectionRef = useRef<HTMLDivElement | null>(null);
   const [deletePostId, setDeletePostId] = useState<string | null>(null);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
@@ -353,6 +356,36 @@ function CompletedTrialsContent() {
       cancelled = true;
     };
   }, [selectedPost?.id]);
+
+  // 카드용 댓글 수
+  const completedPostIds = useMemo(() => filteredPosts.map((p) => p.id), [filteredPosts]);
+  useEffect(() => {
+    if (completedPostIds.length === 0) {
+      setCommentCountsByPostId({});
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/posts/comment-counts?ids=${completedPostIds.join(",")}`)
+      .then((r) => r.json().catch(() => ({ counts: {} })))
+      .then((data: { counts?: Record<string, number> }) => {
+        if (cancelled) return;
+        setCommentCountsByPostId(data.counts ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setCommentCountsByPostId({});
+      });
+    return () => { cancelled = true; };
+  }, [completedPostIds.join(",")]);
+
+  // 카드에서 댓글 클릭으로 모달 열었을 때 댓글 섹션으로 스크롤
+  useEffect(() => {
+    if (!selectedPost || !scrollToCommentsOnOpen) return;
+    const t = setTimeout(() => {
+      commentsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setScrollToCommentsOnOpen(false);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [selectedPost?.id, scrollToCommentsOnOpen]);
 
   // 배심원 라벨링
   useEffect(() => {
@@ -1044,6 +1077,15 @@ function CompletedTrialsContent() {
                     <span className="text-red-400/80">유죄 {guiltyPct}% ({p.guilty}표)</span>
                     <span className="text-blue-400/80">무죄 {notGuiltyPct}% ({p.not_guilty}표)</span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setSelectedPost(p); setScrollToCommentsOnOpen(true); }}
+                    className="mt-1.5 flex items-center justify-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-400 transition"
+                    aria-label="댓글 보기"
+                  >
+                    <span aria-hidden>💬</span>
+                    <span>{commentCountsByPostId[p.id] ?? 0}</span>
+                  </button>
                 </div>
 
                 {/* 하단 버튼 */}
@@ -1563,7 +1605,7 @@ function CompletedTrialsContent() {
               ) : null}
 
               {/* 배심원 한마디 (대댓글 지원) */}
-              <div className="border-t border-zinc-800 pt-6">
+              <div ref={commentsSectionRef} className="border-t border-zinc-800 pt-6">
                 <div className="mb-3 text-xs font-black tracking-widest uppercase text-zinc-500">
                   배심원 한마디
                 </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useEffect, useState, useMemo } from "react";
+import React, { Suspense, useEffect, useState, useMemo, useRef } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -109,6 +109,9 @@ function OngoingTrialsContent() {
     id: string | null;
   }>({ type: null, id: null });
   const [reportReason, setReportReason] = useState<string>("욕설/비하");
+  const [commentCountsByPostId, setCommentCountsByPostId] = useState<Record<string, number>>({});
+  const [scrollToCommentsOnOpen, setScrollToCommentsOnOpen] = useState(false);
+  const commentsSectionRef = useRef<HTMLDivElement | null>(null);
 
   // 오늘의 개판(투표수 많은 순)
   const topOfDayPost = useMemo(() => {
@@ -359,6 +362,36 @@ function OngoingTrialsContent() {
       cancelled = true;
     };
   }, [selectedPost?.id]);
+
+  // 카드용 댓글 수
+  const ongoingPostIds = useMemo(() => posts.map((p) => p.id), [posts]);
+  useEffect(() => {
+    if (ongoingPostIds.length === 0) {
+      setCommentCountsByPostId({});
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/posts/comment-counts?ids=${ongoingPostIds.join(",")}`)
+      .then((r) => r.json().catch(() => ({ counts: {} })))
+      .then((data: { counts?: Record<string, number> }) => {
+        if (cancelled) return;
+        setCommentCountsByPostId(data.counts ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setCommentCountsByPostId({});
+      });
+    return () => { cancelled = true; };
+  }, [ongoingPostIds.join(",")]);
+
+  // 카드에서 댓글 클릭으로 모달 열었을 때 댓글 섹션으로 스크롤
+  useEffect(() => {
+    if (!selectedPost || !scrollToCommentsOnOpen) return;
+    const t = setTimeout(() => {
+      commentsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setScrollToCommentsOnOpen(false);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [selectedPost?.id, scrollToCommentsOnOpen]);
 
   // 배심원 라벨링
   useEffect(() => {
@@ -1070,6 +1103,15 @@ function OngoingTrialsContent() {
                           <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-amber-400/90 bg-zinc-900 text-[10px] font-black text-amber-400 shadow-[0_0_6px_rgba(245,158,11,0.5)]" aria-hidden>⚡</span>
                         ) : null}
                       </div>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setSelectedPost(p); setScrollToCommentsOnOpen(true); }}
+                        className="mt-1.5 flex items-center justify-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-400 transition"
+                        aria-label="댓글 보기"
+                      >
+                        <span aria-hidden>💬</span>
+                        <span>{commentCountsByPostId[p.id] ?? 0}</span>
+                      </button>
                     </div>
                   );
                 })()}
@@ -1606,7 +1648,7 @@ function OngoingTrialsContent() {
               ) : null}
 
               {/* 배심원 한마디 (대댓글 지원) */}
-              <div className="border-t border-zinc-800 pt-6">
+              <div ref={commentsSectionRef} className="border-t border-zinc-800 pt-6">
                 <div className="mb-3 text-xs font-black tracking-widest uppercase text-zinc-500">
                   배심원 한마디
                 </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useEffect, useState, useMemo } from "react";
+import React, { Suspense, useEffect, useState, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Logo } from "@/app/components/Logo";
@@ -182,6 +182,9 @@ function HallOfFameContent() {
   const commentDeletePasswordRef = React.useRef<HTMLInputElement | null>(null);
   const deletePasswordRef = React.useRef<HTMLInputElement | null>(null);
   const verdictDetailRef = React.useRef<HTMLDivElement | null>(null);
+  const commentsSectionRef = useRef<HTMLDivElement | null>(null);
+  const [commentCountsByPostId, setCommentCountsByPostId] = useState<Record<string, number>>({});
+  const [scrollToCommentsOnOpen, setScrollToCommentsOnOpen] = useState(false);
 
   // URL ?post=id 로 진입 시 해당 판결문 모달 바로 열기
   useEffect(() => {
@@ -611,6 +614,38 @@ function HallOfFameContent() {
     return m;
   }, [weeklyWinners]);
 
+  const visiblePostIdsForCommentCount = useMemo(
+    () => weeklyWinners.map((w) => w.post.id),
+    [weeklyWinners],
+  );
+
+  useEffect(() => {
+    if (visiblePostIdsForCommentCount.length === 0) {
+      setCommentCountsByPostId({});
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/posts/comment-counts?ids=${visiblePostIdsForCommentCount.join(",")}`)
+      .then((r) => r.json().catch(() => ({ counts: {} })))
+      .then((data: { counts?: Record<string, number>; error?: string }) => {
+        if (cancelled) return;
+        setCommentCountsByPostId(data.counts ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setCommentCountsByPostId({});
+      });
+    return () => { cancelled = true; };
+  }, [visiblePostIdsForCommentCount.join(",")]);
+
+  useEffect(() => {
+    if (!selectedPost || !scrollToCommentsOnOpen) return;
+    const t = setTimeout(() => {
+      commentsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setScrollToCommentsOnOpen(false);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [selectedPost?.id, scrollToCommentsOnOpen]);
+
   const closeAccuse = () => {
     setIsReviewing(false);
     setIsAccuseOpen(false);
@@ -985,6 +1020,15 @@ function HallOfFameContent() {
                       <span className="text-red-400/80">유죄 {guiltyPct}% ({p.guilty}표)</span>
                       <span className="text-blue-400/80">무죄 {notGuiltyPct}% ({p.not_guilty}표)</span>
                     </div>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setSelectedPost(p); setScrollToCommentsOnOpen(true); }}
+                      className="mt-1.5 flex items-center justify-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-400 transition"
+                      aria-label="댓글 보기"
+                    >
+                      <span aria-hidden>💬</span>
+                      <span>{commentCountsByPostId[p.id] ?? 0}</span>
+                    </button>
                   </div>
 
                   {/* 하단 버튼 */}
@@ -1493,7 +1537,7 @@ function HallOfFameContent() {
               ) : null}
 
               {/* 배심원 한마디 */}
-              <div className="border-t border-zinc-800 pt-6">
+              <div ref={commentsSectionRef} className="border-t border-zinc-800 pt-6">
                 <div className="mb-3 text-xs font-black tracking-widest uppercase text-zinc-500">
                   배심원 한마디
                 </div>
