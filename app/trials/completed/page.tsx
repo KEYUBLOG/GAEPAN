@@ -137,13 +137,6 @@ function CompletedTrialsContent() {
   const [deletePostId, setDeletePostId] = useState<string | null>(null);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
-  const [editPostId, setEditPostId] = useState<string | null>(null);
-  const [editTitle, setEditTitle] = useState("");
-  const [editContent, setEditContent] = useState("");
-  const [editCategory, setEditCategory] = useState("");
-  const [editPassword, setEditPassword] = useState("");
-  const [editSubmitting, setEditSubmitting] = useState(false);
-  const [editError, setEditError] = useState<string | null>(null);
   const [isAccuseOpen, setIsAccuseOpen] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
   const [judgeResult, setJudgeResult] = useState<{
@@ -526,58 +519,12 @@ function CompletedTrialsContent() {
     setPostMenuOpenId(null);
   };
 
-  const closeEditModal = () => {
-    setEditPostId(null);
-    setEditTitle("");
-    setEditContent("");
-    setEditCategory("");
-    setEditPassword("");
-    setEditError(null);
-    setEditSubmitting(false);
-  };
-
-  const handleEditPost = async (postId: string, payload: { password: string; title: string; content: string; category?: string | null }) => {
-    if (!postId?.trim() || !payload.password.trim()) return;
-    setEditSubmitting(true);
-    setEditError(null);
-    try {
-      const r = await fetch(`/api/posts/${postId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          password: payload.password.trim(),
-          title: payload.title.trim(),
-          content: payload.content,
-          category: payload.category === "" ? null : payload.category ?? undefined,
-        }),
-      });
-      const data = (await r.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-      if (!r.ok || (data && data.ok === false)) {
-        setEditError(data?.error ?? "수정에 실패했습니다.");
-        setEditSubmitting(false);
-        return;
-      }
-      const title = payload.title.trim();
-      const content = payload.content;
-      const category = payload.category === "" ? null : (payload.category ?? null);
-      setSelectedPost((prev) => (prev?.id === postId ? { ...prev, title, content, category } : prev));
-      setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, title, content, category } : p)));
-      closeEditModal();
-      setPostMenuOpenId(null);
-      window.alert("판결문이 수정되었습니다.");
-    } catch (err) {
-      console.error("[handleEditPost]", err);
-      setEditError("수정 요청 중 오류가 발생했습니다.");
-      setEditSubmitting(false);
-    }
-  };
-
   const handleDeletePost = async (postId: string, password: string) => {
     if (typeof window === "undefined") return;
     if (!postId?.trim()) return;
     const trimmed = password.trim();
     if (!trimmed) {
-      window.alert("판결문 수정 및 삭제 비밀번호를 입력해 주세요.");
+      window.alert("판결문 삭제 비밀번호를 입력해 주세요.");
       return;
     }
     setDeleteSubmitting(true);
@@ -730,7 +677,7 @@ function CompletedTrialsContent() {
       return;
     }
     if (!form.password?.trim()) {
-      setJudgeError("판결문 수정 및 삭제 비밀번호를 입력해 주세요.");
+      setJudgeError("판결문 삭제 비밀번호를 입력해 주세요.");
       return;
     }
 
@@ -1381,21 +1328,6 @@ function CompletedTrialsContent() {
                           <button
                             type="button"
                             onClick={() => {
-                              setEditPostId(selectedPost.id);
-                              setEditTitle(selectedPost.title);
-                              setEditContent(selectedPost.content ?? "");
-                              setEditCategory(selectedPost.category ?? "");
-                              setEditPassword("");
-                              setEditError(null);
-                              setPostMenuOpenId(null);
-                            }}
-                            className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800"
-                          >
-                            판결문 수정
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
                               setDeletePostId(selectedPost.id);
                               setPostMenuOpenId(null);
                             }}
@@ -1670,7 +1602,7 @@ function CompletedTrialsContent() {
                     value={commentFormPassword}
                     onChange={(e) => setCommentFormPassword(e.target.value)}
                     disabled={commentSubmitting}
-                    placeholder="판결문 수정 및 삭제 비밀번호 (20자 이내)"
+                    placeholder="판결문 삭제 비밀번호 (20자 이내)"
                     maxLength={20}
                     className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-amber-500/60"
                   />
@@ -1993,96 +1925,13 @@ function CompletedTrialsContent() {
         })()
       ) : null}
 
-      {/* 판결문 수정 모달 */}
-      {editPostId ? (
-        <div className="fixed inset-0 z-[190] flex items-center justify-center bg-black/70 p-4 overflow-y-auto">
-          <div className="w-full max-w-lg rounded-2xl bg-zinc-950 border border-zinc-800 p-5 space-y-4 my-8">
-            <h4 className="text-sm font-black text-zinc-100">판결문 수정</h4>
-            <p className="text-xs text-zinc-400">
-              제목, 카테고리, 내용을 수정한 뒤, 기소 시 설정한 판결문 수정 및 삭제 비밀번호를 입력하세요.
-            </p>
-            <div>
-              <label className="block text-xs font-bold text-zinc-400 mb-1">제목</label>
-              <input
-                type="text"
-                value={editTitle}
-                onChange={(e) => setEditTitle(e.target.value)}
-                disabled={editSubmitting}
-                maxLength={200}
-                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-500/60 outline-none disabled:opacity-60"
-                placeholder="제목"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-zinc-400 mb-1">카테고리</label>
-              <select
-                value={editCategory}
-                onChange={(e) => setEditCategory(e.target.value)}
-                disabled={editSubmitting}
-                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 focus:border-amber-500/60 outline-none disabled:opacity-60"
-              >
-                <option value="">선택 안 함</option>
-                {CATEGORY_OPTIONS.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-zinc-400 mb-1">내용 (사건 경위)</label>
-              <textarea
-                value={editContent}
-                onChange={(e) => setEditContent(e.target.value)}
-                disabled={editSubmitting}
-                rows={6}
-                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-500/60 outline-none disabled:opacity-60 resize-y"
-                placeholder="사건 경위"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-zinc-400 mb-1">판결문 수정 및 삭제 비밀번호</label>
-              <input
-                type="password"
-                value={editPassword}
-                onChange={(e) => setEditPassword(e.target.value)}
-                disabled={editSubmitting}
-                maxLength={20}
-                placeholder="판결문 수정 및 삭제 비밀번호"
-                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-500/60 outline-none disabled:opacity-60"
-              />
-              <p className="mt-1 text-[11px] text-zinc-500">*작성 후 수정 및 삭제를 위해 반드시 기억해주세요.</p>
-            </div>
-            {editError ? (
-              <p className="text-xs text-red-400">{editError}</p>
-            ) : null}
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={closeEditModal}
-                disabled={editSubmitting}
-                className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-bold text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-              >
-                취소
-              </button>
-              <button
-                type="button"
-                onClick={() => handleEditPost(editPostId, { password: editPassword, title: editTitle, content: editContent, category: editCategory || null })}
-                disabled={!editTitle.trim() || !editPassword.trim() || editSubmitting}
-                className="rounded-xl bg-amber-500 px-3 py-1.5 text-xs font-bold text-black hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {editSubmitting ? "수정 중..." : "수정 완료"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       {/* 판결문 삭제 비밀번호 모달 */}
       {deletePostId ? (
         <div className="fixed inset-0 z-[190] flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-zinc-950 border border-zinc-800 p-5 space-y-4">
             <h4 className="text-sm font-black text-zinc-100">판결문 삭제</h4>
             <p className="text-xs text-zinc-400">
-              기소 시 설정한 판결문 수정 및 삭제 비밀번호를 입력하세요.
+              기소 시 설정한 판결문 삭제 비밀번호를 입력하세요.
             </p>
             <input
               ref={deletePasswordRef}
@@ -2096,13 +1945,13 @@ function CompletedTrialsContent() {
                 }
                 if (e.key === "Escape") closeDeleteModal();
               }}
-              placeholder="판결문 수정 및 삭제 비밀번호"
+              placeholder="판결문 삭제 비밀번호"
               maxLength={20}
               autoComplete="current-password"
               disabled={deleteSubmitting}
               className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 outline-none disabled:opacity-60"
             />
-            <p className="text-[11px] text-zinc-500">*작성 후 수정 및 삭제를 위해 반드시 기억해주세요.</p>
+            <p className="text-[11px] text-zinc-500">*작성 후 삭제 시 사용하므로 반드시 기억해주세요.</p>
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
@@ -2426,20 +2275,20 @@ function CompletedTrialsContent() {
 
                 <div>
                   <label className="block text-xs font-black tracking-widest uppercase text-zinc-400">
-                    판결문 수정 및 삭제 비밀번호
+                    판결문 삭제 비밀번호
                   </label>
-                  <p className="mt-1 text-xs text-zinc-500 mb-2">나중에 판결문을 수정·삭제할 때 사용할 비밀번호입니다.</p>
+                  <p className="mt-1 text-xs text-zinc-500 mb-2">나중에 판결문을 삭제할 때 사용할 비밀번호입니다.</p>
                   <input
                     type="password"
                     value={form.password}
                     onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
                     disabled={isReviewing}
                     className="mt-2 w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 transition"
-                    placeholder="판결문 수정 및 삭제 비밀번호"
+                    placeholder="판결문 삭제 비밀번호"
                     maxLength={20}
                     required
                   />
-                  <p className="mt-1 text-[11px] text-zinc-500">*작성 후 수정 및 삭제를 위해 반드시 기억해주세요.</p>
+                  <p className="mt-1 text-[11px] text-zinc-500">*작성 후 삭제 시 사용하므로 반드시 기억해주세요.</p>
                 </div>
               </div>
 
