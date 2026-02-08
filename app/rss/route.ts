@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 
 const BASE_URL = "https://gaepanai.com";
 
+/** 항상 서버에서 실행되도록 (배포 시 404 방지) */
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 /** XML 특수문자 이스케이프 (네이버 서치어드바이저 RSS 호환) */
 function escapeXml(str: string): string {
   return str

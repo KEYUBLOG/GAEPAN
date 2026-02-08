@@ -286,6 +286,7 @@ function HomeContent() {
   const [deleteToast, setDeleteToast] = useState<{ message: string; isError?: boolean } | null>(null);
   const [trialTab, setTrialTab] = useState<"ongoing" | "completed">("ongoing");
   const [ongoingSort, setOngoingSort] = useState<"latest" | "votes" | "urgent">("urgent");
+  const [completedSort, setCompletedSort] = useState<"latest" | "votes">("latest");
   const [liveFeedItems, setLiveFeedItems] = useState<Array<{
     id: string;
     post_id: string;
@@ -1485,6 +1486,17 @@ function HomeContent() {
     const notInWinners = completed.filter((p) => !winnerIds.has(p.id));
     return [...inWinners, ...notInWinners];
   }, [recentPosts, weeklyWinners]);
+
+  // 판결 완료된 사건 정렬 (최신순 / 인기순)
+  const completedPostsSorted = useMemo(() => {
+    const list = [...completedPosts];
+    if (completedSort === "latest") {
+      list.sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
+    } else {
+      list.sort((a, b) => (b.guilty + b.not_guilty) - (a.guilty + a.not_guilty));
+    }
+    return list;
+  }, [completedPosts, completedSort]);
 
   // 명예의 전당에 올라간 글의 주차 정보 (판결 완료 카드 배지용)
   const winnerWeekByPostId = useMemo(() => {
@@ -2805,6 +2817,30 @@ function HomeContent() {
             <h3 className="text-2xl md:text-3xl font-black mb-1">판결 완료된 사건</h3>
             <p className="text-zinc-500 text-sm">GAEPAN 법정을 거친 판결들입니다.</p>
           </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setCompletedSort("latest")}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${
+                completedSort === "latest"
+                  ? "bg-amber-500 text-black"
+                  : "bg-zinc-900 text-zinc-400 border border-zinc-800 hover:border-amber-500/50"
+              }`}
+            >
+              최신순
+            </button>
+            <button
+              type="button"
+              onClick={() => setCompletedSort("votes")}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${
+                completedSort === "votes"
+                  ? "bg-amber-500 text-black"
+                  : "bg-zinc-900 text-zinc-400 border border-zinc-800 hover:border-amber-500/50"
+              }`}
+            >
+              인기순
+            </button>
+          </div>
         </div>
 
         {postsError ? (
@@ -2813,7 +2849,7 @@ function HomeContent() {
           </div>
         ) : null}
 
-        {isLoadingPosts && completedPosts.length === 0 ? (
+        {isLoadingPosts && completedPostsSorted.length === 0 ? (
           <div className="grid md:grid-cols-2 gap-6 mt-4">
             {Array.from({ length: 2 }).map((_, i) => (
               <div
@@ -2829,16 +2865,16 @@ function HomeContent() {
           </div>
         ) : null}
 
-        {!isLoadingPosts && completedPosts.length === 0 && !postsError ? (
+        {!isLoadingPosts && completedPostsSorted.length === 0 && !postsError ? (
           <div className="mt-6 text-sm text-zinc-500">
             판결 완료된 사건이 없습니다.
           </div>
         ) : null}
 
-        {completedPosts.length > 0 ? (
+        {completedPostsSorted.length > 0 ? (
           <>
             <div className="grid md:grid-cols-2 gap-3 md:gap-6 mt-4 md:mt-6 overflow-x-hidden break-all min-w-0">
-              {completedPosts.slice(0, 2).map((p) => {
+              {completedPostsSorted.slice(0, 2).map((p) => {
                 const total = p.guilty + p.not_guilty;
                 const guiltyPct = total ? Math.round((p.guilty / total) * 100) : 0;
                 const notGuiltyPct = total ? Math.round((p.not_guilty / total) * 100) : 0;
@@ -3089,13 +3125,13 @@ function HomeContent() {
               })}
             </div>
             {/* 더보기 버튼 */}
-            {completedPosts.length > 2 ? (
+            {completedPostsSorted.length > 2 ? (
               <div className="mt-6 text-center">
                 <Link
                   href="/trials/completed"
                   className="inline-block rounded-xl border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-8 py-3 text-sm font-bold transition"
                 >
-                  더보기 ({completedPosts.length - 2}건 더)
+                  더보기 ({completedPostsSorted.length - 2}건 더)
                 </Link>
               </div>
             ) : null}
