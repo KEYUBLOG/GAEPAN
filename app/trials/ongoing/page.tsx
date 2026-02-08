@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Logo } from "@/app/components/Logo";
 import { CoupangBanner } from "@/app/components/CoupangBanner";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
@@ -76,6 +77,7 @@ type Comment = {
 };
 
 export default function OngoingTrialsPage() {
+  const searchParams = useSearchParams();
   const [posts, setPosts] = useState<PostPreview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -177,6 +179,48 @@ export default function OngoingTrialsPage() {
       // ignore
     }
   }, []);
+
+  // URL ?post=id 로 진입 시 해당 판결문 모달 바로 열기
+  useEffect(() => {
+    const postId = searchParams.get("post");
+    if (!postId?.trim()) return;
+    const pathname = typeof window !== "undefined" ? window.location.pathname : "/trials/ongoing";
+    const supabase = getSupabaseBrowserClient();
+    supabase
+      .from("posts")
+      .select("*, verdict_rationale")
+      .eq("id", postId)
+      .maybeSingle()
+      .then(({ data: row, error }) => {
+        if (error || !row) return;
+        const post: PostPreview = {
+          id: String((row as any).id ?? ""),
+          title: ((row as any).title as string) ?? "",
+          plaintiff: ((row as any).plaintiff as string | null) ?? null,
+          defendant: ((row as any).defendant as string | null) ?? null,
+          content: ((row as any).content as string | null) ?? null,
+          verdict: ((row as any).verdict as string) ?? "",
+          verdict_rationale:
+            (typeof (row as any).verdict_rationale === "string"
+              ? (row as any).verdict_rationale
+              : typeof (row as any).verdictRationale === "string"
+                ? (row as any).verdictRationale
+                : "") ?? "",
+          ratio: toRatioNumber((row as any).ratio),
+          created_at: ((row as any).created_at as string | null) ?? null,
+          guilty: Number((row as any).guilty) || 0,
+          not_guilty: Number((row as any).not_guilty) || 0,
+          image_url: ((row as any).image_url as string | null) ?? null,
+          author_id: ((row as any).author_id as string | null) ?? null,
+          case_number: (row as any).case_number != null && Number.isFinite(Number((row as any).case_number)) ? Number((row as any).case_number) : null,
+          category: ((row as any).category as string | null) ?? null,
+          trial_type: ((row as any).trial_type === "DEFENSE" || (row as any).trial_type === "ACCUSATION") ? (row as any).trial_type : null,
+          voting_ended_at: ((row as any).voting_ended_at as string | null) ?? null,
+        };
+        setSelectedPost(post);
+        window.history.replaceState(null, "", pathname);
+      });
+  }, [searchParams]);
 
   // 판결문 상세 모달이 열려 있을 때 배경 스크롤 잠금
   useEffect(() => {
