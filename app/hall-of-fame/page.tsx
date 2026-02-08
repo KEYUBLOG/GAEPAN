@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { Suspense, useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Logo } from "@/app/components/Logo";
@@ -119,7 +119,7 @@ type Comment = {
   is_operator?: boolean;
 };
 
-export default function HallOfFamePage() {
+function HallOfFameContent() {
   const searchParams = useSearchParams();
   const [posts, setPosts] = useState<PostPreview[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2486,5 +2486,13 @@ export default function HallOfFamePage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+export default function HallOfFamePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-zinc-950 flex items-center justify-center"><span className="text-zinc-500">로딩 중...</span></div>}>
+      <HallOfFameContent />
+    </Suspense>
   );
 }

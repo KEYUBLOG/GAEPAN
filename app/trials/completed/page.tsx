@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { Suspense, useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Logo } from "@/app/components/Logo";
@@ -75,7 +75,7 @@ type Comment = {
   is_operator?: boolean;
 };
 
-export default function CompletedTrialsPage() {
+function CompletedTrialsContent() {
   const searchParams = useSearchParams();
   const [posts, setPosts] = useState<PostPreview[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2496,5 +2496,13 @@ export default function CompletedTrialsPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+export default function CompletedTrialsPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-zinc-950 flex items-center justify-center"><span className="text-zinc-500">로딩 중...</span></div>}>
+      <CompletedTrialsContent />
+    </Suspense>
   );
 }
