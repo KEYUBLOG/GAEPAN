@@ -35,7 +35,7 @@ export function CoupangLinkBanner({ href = DEFAULT_HREF, className = "" }: Props
           <ShoppingIcon className="w-3.5 h-3.5" />
         </span>
         <span className="text-[11px] md:text-xs font-bold text-zinc-200">
-          쿠팡에서 Apple 공식 브랜드관 보기
+          쿠팡이 추천하는 Apple 공식 브랜드관 특가 보기
         </span>
         <span className="text-[9px] text-zinc-500 font-medium tracking-wider select-none shrink-0">
           AD
