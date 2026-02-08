@@ -369,7 +369,9 @@ function CompletedTrialsContent() {
     return () => clearTimeout(t);
   }, [selectedPost?.id, scrollToCommentsOnOpen]);
 
-  // 배심원 라벨링
+  // 배심원 라벨링: 작성자만 원고, 나머지는 배심원 1, 2, ... (익명은 댓글마다 별도 번호)
+  const getCommentLabelKey = (c: { id: string; author_id: string | null; is_post_author?: boolean }) =>
+    c.author_id ?? (c.is_post_author ? "__author__" : `comment_${c.id}`);
   useEffect(() => {
     if (!selectedPost) {
       setJurorLabels({});
@@ -383,15 +385,11 @@ function CompletedTrialsContent() {
     const map: Record<string, string> = {};
     let idx = 1;
     for (const c of sorted) {
-      const key = c.author_id ?? "__anon__";
+      const key = getCommentLabelKey(c);
       if (c.is_post_author) {
-        if (!map[key]) {
-          map[key] = "원고";
-        }
+        if (!map[key]) map[key] = "원고";
       } else {
-        if (!map[key]) {
-          map[key] = `배심원 ${idx++}`;
-        }
+        if (!map[key]) map[key] = `배심원 ${idx++}`;
       }
     }
     setJurorLabels(map);
@@ -1713,7 +1711,7 @@ function CompletedTrialsContent() {
                         }`}>
                           <div className="mb-1 flex items-center gap-2 text-[11px]">
                             <span className={`font-bold ${isOperator ? "text-amber-400" : "text-amber-300"}`}>
-                              {jurorLabels[c.author_id ?? "__anon__"] ?? "배심원"}
+                              {jurorLabels[getCommentLabelKey(c)] ?? "배심원"}
                             </span>
                             {isOperator ? (
                               <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/30 px-2 py-0.5 text-[10px] font-black text-amber-200 border border-amber-500/50">
@@ -1854,7 +1852,7 @@ function CompletedTrialsContent() {
                               <div className="mb-1 flex flex-wrap items-center gap-1.5">
                                 {!isReplyOperator ? (
                                   <span className="font-bold shrink-0 whitespace-nowrap text-amber-500/80 text-[10px] sm:text-[11px]">
-                                    {jurorLabels[reply.author_id ?? "__anon__"] ?? "배심원"}
+                                    {jurorLabels[getCommentLabelKey(reply)] ?? "배심원"}
                                   </span>
                                 ) : null}
                                 {isReplyOperator ? (
