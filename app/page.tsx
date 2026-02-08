@@ -276,7 +276,7 @@ function HomeContent() {
   const [reportReason, setReportReason] = useState<string>("욕설/비하");
 
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
-  const [commentSort, setCommentSort] = useState<"latest" | "popular">("latest");
+  const [commentSort, setCommentSort] = useState<"oldest" | "latest" | "popular">("oldest");
   const [commentMenuOpenId, setCommentMenuOpenId] = useState<string | null>(null);
   const [likedPostIds, setLikedPostIds] = useState<Set<string>>(new Set());
   const [likedCommentIds, setLikedCommentIds] = useState<Set<string>>(new Set());
@@ -1365,10 +1365,9 @@ function HomeContent() {
       if (commentSort === "popular") {
         if (b.likes !== a.likes) return b.likes - a.likes;
       }
-      return (
-        new Date(b.created_at ?? 0).getTime() -
-        new Date(a.created_at ?? 0).getTime()
-      );
+      const aT = new Date(a.created_at ?? 0).getTime();
+      const bT = new Date(b.created_at ?? 0).getTime();
+      return commentSort === "oldest" ? aT - bT : bT - aT;
     });
     const top = sorted.filter((c) => !c.parent_id);
     const byParent = new Map<string, Comment[]>();
@@ -4222,6 +4221,13 @@ function HomeContent() {
                 ) : (
                   <>
                     <div className="mt-4 flex flex-wrap items-center gap-2 sm:gap-4 text-[11px] text-zinc-500">
+                      <button
+                        type="button"
+                        onClick={() => setCommentSort("oldest")}
+                        className={`shrink-0 whitespace-nowrap ${commentSort === "oldest" ? "font-semibold text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
+                      >
+                        작성순
+                      </button>
                       <button
                         type="button"
                         onClick={() => setCommentSort("latest")}

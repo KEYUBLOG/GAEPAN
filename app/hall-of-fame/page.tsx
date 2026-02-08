@@ -137,7 +137,7 @@ function HallOfFameContent() {
   const [commentDeletePassword, setCommentDeletePassword] = useState("");
   const [commentDeleteSubmitting, setCommentDeleteSubmitting] = useState(false);
   const [commentDeleteError, setCommentDeleteError] = useState<string | null>(null);
-  const [commentSort, setCommentSort] = useState<"latest" | "popular">("latest");
+  const [commentSort, setCommentSort] = useState<"oldest" | "latest" | "popular">("oldest");
   const [likedCommentIds, setLikedCommentIds] = useState<Set<string>>(new Set());
   const [commentMenuOpenId, setCommentMenuOpenId] = useState<string | null>(null);
   const [postMenuOpenId, setPostMenuOpenId] = useState<string | null>(null);
@@ -449,10 +449,9 @@ function HallOfFameContent() {
       if (commentSort === "popular") {
         if (b.likes !== a.likes) return b.likes - a.likes;
       }
-      return (
-        new Date(b.created_at ?? 0).getTime() -
-        new Date(a.created_at ?? 0).getTime()
-      );
+      const aT = new Date(a.created_at ?? 0).getTime();
+      const bT = new Date(b.created_at ?? 0).getTime();
+      return commentSort === "oldest" ? aT - bT : bT - aT;
     });
     const top = sorted.filter((c) => !c.parent_id);
     const byParent = new Map<string, Comment[]>();
@@ -1605,6 +1604,17 @@ function HallOfFameContent() {
                 ) : (
                   <>
                     <div className="mt-4 flex items-center gap-4 text-[11px] text-zinc-500">
+                      <button
+                        type="button"
+                        onClick={() => setCommentSort("oldest")}
+                        className={
+                          commentSort === "oldest"
+                            ? "font-semibold text-zinc-100"
+                            : "text-zinc-500 hover:text-zinc-300"
+                        }
+                      >
+                        작성순
+                      </button>
                       <button
                         type="button"
                         onClick={() => setCommentSort("latest")}
