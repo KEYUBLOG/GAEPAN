@@ -3109,7 +3109,7 @@ function HomeContent() {
             {/* 명예의 전당 — 연도/주차별 오늘의 개판 1위 (판결문/속보형 카드) */}
             <section ref={hallOfFameRef} className="py-12 md:py-16 scroll-mt-32 border-t border-zinc-900 mt-8 md:mt-12">
               <div className="mb-8 md:mb-10">
-                <h3 className="text-2xl sm:text-3xl md:text-4xl font-black mb-2">명예의 전당</h3>
+                <h3 className="text-2xl sm:text-3xl md:text-4xl font-black mb-2">🏆 명예의 전당</h3>
                 <p className="text-zinc-500 text-xs sm:text-sm">매주 &apos;오늘의 개판&apos; 1위로 선정된 사건입니다.</p>
               </div>
               <div className="bg-zinc-900 border border-zinc-800 rounded-[2rem] p-4 md:p-6 lg:p-8">
