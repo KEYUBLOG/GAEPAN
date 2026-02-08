@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Logo } from "@/app/components/Logo";
 import { CoupangBanner } from "@/app/components/CoupangBanner";
+import { CoupangLinkBanner } from "@/app/components/CoupangLinkBanner";
 import { animate, motion } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -1968,6 +1969,8 @@ function HomeContent() {
 
       {/* 실시간 사법 전광판 */}
       <div className="max-w-6xl mx-auto px-4 md:px-16 mt-4 md:mt-6 mb-4">
+        {/* 쿠팡 링크 배너 — 전광판 위 */}
+        <CoupangLinkBanner className="mb-4" />
         <div className="bg-black/40 backdrop-blur-md border border-zinc-800/60 rounded-2xl px-4 py-4 md:px-6 md:py-5 shadow-[0_0_30px_rgba(0,0,0,0.6)]">
           <div className="flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-4 mb-3 text-center">
             <h3 className="text-[11px] md:text-xs font-semibold tracking-[0.2em] uppercase text-zinc-400">
