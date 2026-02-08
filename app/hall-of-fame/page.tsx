@@ -374,8 +374,9 @@ function HallOfFameContent() {
   }, [selectedPost?.id]);
 
   // 배심원 라벨링: 글 작성순(created_at 오름차순)으로 원고 / 배심원 1, 2, ...
-  const getCommentLabelKey = (c: { id: string; author_id: string | null; is_post_author?: boolean }) =>
-    c.author_id ?? (c.is_post_author ? "__author__" : `comment_${c.id}`);
+  // 같은 IP면 같은 배심원 번호 유지 (해당 글에서)
+  const getCommentLabelKey = (c: { id: string; author_id: string | null; is_post_author?: boolean; ip_address?: string | null }) =>
+    c.author_id ?? (c.is_post_author ? "__author__" : (c.ip_address ?? `comment_${c.id}`));
   useEffect(() => {
     if (!selectedPost) {
       setJurorLabels({});
