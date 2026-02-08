@@ -16,6 +16,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "개판 AI - 개인들의 판결소",
+  icons: { icon: "/favicon.ico" },
   description:
     "당신의 억울한 사연, AI 대법관과 배심원들이 판결해드립니다. 지금 바로 소장을 접수하세요.",
   openGraph: {
