@@ -1992,7 +1992,7 @@ function HomeContent() {
                     </span>
                   ) : null}
                   <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold bg-amber-500/15 border border-amber-400/70 text-amber-300 whitespace-nowrap">
-                    <span>👑</span>
+                    <span>🔥</span>
                     <span>오늘의 개판</span>
                   </span>
                 </div>
@@ -2065,63 +2065,39 @@ function HomeContent() {
               ) : (
                 <p className="text-[11px] text-zinc-500 mb-2 text-center">재판 종료</p>
               )}
-              {/* 투표 현황 — 진행 중 카드와 동일 */}
+              {/* 투표 현황 — 막대 + 배심원 참여 문구 (판결문 상세와 동일) */}
               {(() => {
                 const total = filteredTopGuiltyPost.guilty + filteredTopGuiltyPost.not_guilty;
                 const guiltyPct = total ? Math.round((filteredTopGuiltyPost.guilty / total) * 100) : 0;
                 const notGuiltyPct = total ? Math.round((filteredTopGuiltyPost.not_guilty / total) * 100) : 0;
+                const isTie = total > 0 && filteredTopGuiltyPost.guilty === filteredTopGuiltyPost.not_guilty;
                 return (
                   <div className="mb-2 space-y-1">
                     <div className="flex items-center justify-between text-[10px] text-zinc-500">
                       <span className="text-red-400 text-xs md:text-sm">유죄 {guiltyPct}% ({filteredTopGuiltyPost.guilty}표)</span>
                       <span className="text-blue-400 text-xs md:text-sm">무죄 {notGuiltyPct}% ({filteredTopGuiltyPost.not_guilty}표)</span>
                     </div>
-                    <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden flex">
-                      <div className="bg-red-500 h-full transition-all duration-300" style={{ width: `${guiltyPct}%` }} />
-                      <div className="bg-blue-500 h-full transition-all duration-300" style={{ width: `${notGuiltyPct}%` }} />
+                    <div className="relative w-full h-1.5 bg-zinc-800 rounded-full overflow-visible flex">
+                      <div className="bg-red-500 h-full transition-all duration-300 rounded-l-full" style={{ width: `${guiltyPct}%` }} />
+                      <div className="bg-blue-500 h-full transition-all duration-300 rounded-r-full" style={{ width: `${notGuiltyPct}%` }} />
+                      {isTie ? (
+                        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-amber-400/90 bg-zinc-900 text-[10px] font-black text-amber-400 shadow-[0_0_6px_rgba(245,158,11,0.5)]" aria-hidden>⚡</span>
+                      ) : null}
                     </div>
+                    {total > 0 ? (
+                      <p className="text-[11px] text-center text-zinc-400 mt-1">
+                        {isTie ? (
+                          <>배심원 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명이 참여했으나, 누구도 승리를 장담할 수 없는 팽팽한 대립이 이어지고 있습니다. 당신의 한 표가 정의를 결정합니다!</>
+                        ) : (
+                          <>지금까지 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명의 배심원이 참여했습니다.</>
+                        )}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-center text-zinc-500 mt-1">아직 투표가 없습니다.</p>
+                    )}
                   </div>
                 );
               })()}
-              {/* 투표 버튼 — 진행 중 카드와 동일한 패턴, 오늘의 개판에도 노출 */}
-              <div className="mt-3 flex flex-col md:flex-row items-stretch md:items-center justify-center gap-2" onClick={(e) => e.stopPropagation()}>
-                {(() => {
-                  const total = filteredTopGuiltyPost.guilty + filteredTopGuiltyPost.not_guilty;
-                  const guiltyPct = total ? Math.round((filteredTopGuiltyPost.guilty / total) * 100) : 0;
-                  const notGuiltyPct = total ? Math.round((filteredTopGuiltyPost.not_guilty / total) * 100) : 0;
-                  const isDefense = filteredTopGuiltyPost.trial_type === "DEFENSE";
-                  const first = isDefense ? "not_guilty" : "guilty";
-                  const second = isDefense ? "guilty" : "not_guilty";
-                  return (
-                    <>
-                      <button
-                        type="button"
-                        disabled={votingId === filteredTopGuiltyPost.id || !isVotingOpen(filteredTopGuiltyPost.created_at, filteredTopGuiltyPost.voting_ended_at)}
-                        onClick={() => handleVote(filteredTopGuiltyPost.id, first)}
-                        className={`w-full md:w-auto rounded-lg px-4 py-2 md:py-1.5 h-16 md:h-auto text-sm md:text-xs font-bold transition disabled:opacity-50 shadow-sm ${
-                          first === "not_guilty"
-                            ? (userVotes[filteredTopGuiltyPost.id] === "not_guilty" ? "bg-blue-500/50 ring-1 ring-blue-400/60 text-blue-100" : "bg-blue-500/20 hover:bg-blue-500/30 text-blue-400")
-                            : (userVotes[filteredTopGuiltyPost.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
-                        }`}
-                      >
-                        {first === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? filteredTopGuiltyPost.not_guilty : filteredTopGuiltyPost.guilty}표
-                      </button>
-                      <button
-                        type="button"
-                        disabled={votingId === filteredTopGuiltyPost.id || !isVotingOpen(filteredTopGuiltyPost.created_at, filteredTopGuiltyPost.voting_ended_at)}
-                        onClick={() => handleVote(filteredTopGuiltyPost.id, second)}
-                        className={`w-full md:w-auto rounded-lg px-4 py-2 md:py-1.5 h-16 md:h-auto text-sm md:text-xs font-bold transition disabled:opacity-50 shadow-sm ${
-                          second === "not_guilty"
-                            ? (userVotes[filteredTopGuiltyPost.id] === "not_guilty" ? "bg-blue-500/50 ring-1 ring-blue-400/60 text-blue-100" : "bg-blue-500/20 hover:bg-blue-500/30 text-blue-400")
-                            : (userVotes[filteredTopGuiltyPost.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
-                        }`}
-                      >
-                        {second === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? filteredTopGuiltyPost.not_guilty : filteredTopGuiltyPost.guilty}표
-                      </button>
-                    </>
-                  );
-                })()}
-              </div>
             </div>
           </div>
             </section>
@@ -2585,7 +2561,7 @@ function HomeContent() {
                     ) : null}
                     {filteredTopGuiltyPost && p.id === filteredTopGuiltyPost.id ? (
                       <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold bg-amber-500/15 border border-amber-400/70 text-amber-300 whitespace-nowrap">
-                        <span>👑</span>
+                        <span>🔥</span>
                         <span>오늘의 개판</span>
                       </span>
                     ) : null}
@@ -2735,70 +2711,39 @@ function HomeContent() {
                 <p className="text-[11px] font-bold text-amber-400 mb-2 tabular-nums text-center">
                   ⏳ 남은 시간 {formatCountdown(Math.max(0, getVotingEndsAt(p.created_at) - countdownNow))}
                 </p>
-                {/* 투표 현황 (작은 막대 그래프) */}
+                {/* 투표 현황 (막대) + 배심원 참여 문구 (판결문 상세와 동일) */}
                 {(() => {
                   const total = p.guilty + p.not_guilty;
                   const guiltyPct = total ? Math.round((p.guilty / total) * 100) : 0;
                   const notGuiltyPct = total ? Math.round((p.not_guilty / total) * 100) : 0;
+                  const isTie = total > 0 && p.guilty === p.not_guilty;
                   return (
-                    <div className="mb-2 space-y-1">
+                    <div className="mb-2 space-y-1 mt-auto">
                       <div className="flex items-center justify-between text-[10px] text-zinc-500">
                         <span className="text-red-400 text-xs md:text-sm">유죄 {guiltyPct}% ({p.guilty}표)</span>
                         <span className="text-blue-400 text-xs md:text-sm">무죄 {notGuiltyPct}% ({p.not_guilty}표)</span>
                       </div>
-                      <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden flex">
-                        <div
-                          className="bg-red-500 h-full"
-                          style={{ width: `${guiltyPct}%` }}
-                        />
-                        <div
-                          className="bg-blue-500 h-full"
-                          style={{ width: `${notGuiltyPct}%` }}
-                        />
+                      <div className="relative w-full h-1.5 bg-zinc-800 rounded-full overflow-visible flex">
+                        <div className="bg-red-500 h-full rounded-l-full" style={{ width: `${guiltyPct}%` }} />
+                        <div className="bg-blue-500 h-full rounded-r-full" style={{ width: `${notGuiltyPct}%` }} />
+                        {isTie ? (
+                          <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-amber-400/90 bg-zinc-900 text-[10px] font-black text-amber-400 shadow-[0_0_6px_rgba(245,158,11,0.5)]" aria-hidden>⚡</span>
+                        ) : null}
                       </div>
+                      {total > 0 ? (
+                        <p className="text-[11px] text-center text-zinc-400 mt-1">
+                          {isTie ? (
+                            <>배심원 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명이 참여했으나, 누구도 승리를 장담할 수 없는 팽팽한 대립이 이어지고 있습니다. 당신의 한 표가 정의를 결정합니다!</>
+                          ) : (
+                            <>지금까지 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명의 배심원이 참여했습니다.</>
+                          )}
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-center text-zinc-500 mt-1">아직 투표가 없습니다.</p>
+                      )}
                     </div>
                   );
                 })()}
-                
-                {/* 투표 버튼 - 무죄주장이면 무죄가 앞(왼쪽) */}
-                <div className="flex flex-col md:flex-row items-stretch md:items-center justify-center gap-2 mt-auto" onClick={(e) => e.stopPropagation()}>
-                  {(() => {
-                    const total = p.guilty + p.not_guilty;
-                    const guiltyPct = total ? Math.round((p.guilty / total) * 100) : 0;
-                    const notGuiltyPct = total ? Math.round((p.not_guilty / total) * 100) : 0;
-                    const isDefense = p.trial_type === "DEFENSE";
-                    const first = isDefense ? "not_guilty" : "guilty";
-                    const second = isDefense ? "guilty" : "not_guilty";
-                    return (
-                      <>
-                        <button
-                          type="button"
-                          disabled={votingId === p.id || !isVotingOpen(p.created_at, p.voting_ended_at)}
-                          onClick={() => handleVote(p.id, first)}
-                          className={`w-full md:w-auto rounded-lg px-4 py-2 md:py-1.5 h-16 md:h-auto text-sm md:text-xs font-bold transition disabled:opacity-50 shadow-sm ${
-                            first === "not_guilty"
-                              ? (userVotes[p.id] === "not_guilty" ? "bg-blue-500/50 ring-1 ring-blue-400/60 text-blue-100" : "bg-blue-500/20 hover:bg-blue-500/30 text-blue-400")
-                              : (userVotes[p.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
-                          }`}
-                        >
-                          {first === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? p.not_guilty : p.guilty}표
-                        </button>
-                        <button
-                          type="button"
-                          disabled={votingId === p.id || !isVotingOpen(p.created_at, p.voting_ended_at)}
-                          onClick={() => handleVote(p.id, second)}
-                          className={`w-full md:w-auto rounded-lg px-4 py-2 md:py-1.5 h-16 md:h-auto text-sm md:text-xs font-bold transition disabled:opacity-50 shadow-sm ${
-                            second === "not_guilty"
-                              ? (userVotes[p.id] === "not_guilty" ? "bg-blue-500/50 ring-1 ring-blue-400/60 text-blue-100" : "bg-blue-500/20 hover:bg-blue-500/30 text-blue-400")
-                              : (userVotes[p.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
-                          }`}
-                        >
-                          {second === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? p.not_guilty : p.guilty}표
-                        </button>
-                      </>
-                    );
-                  })()}
-                </div>
                 </article>
               ))}
             </div>
@@ -3074,34 +3019,48 @@ function HomeContent() {
                   )}
                 </div>
 
-                {/* 최종 스코어 보드 — 하단 전체 폭 바 + AI 대법관 확정 라벨 (0%인 쪽은 렌더 안 함 → 색 섞임 방지) */}
+                {/* 최종 스코어 보드 — 하단 전체 폭 바 + AI 대법관 확정 라벨 (0%인 쪽은 렌더 안 함 → 색 섞임 방지). 동점 시 번개 표시 */}
                 <div className="mt-auto space-y-2">
-                  <div className={`w-full h-3 md:h-4 rounded-full overflow-hidden flex ${isWinner ? "bg-zinc-800/80 border border-emerald-500/25" : "bg-zinc-800"}`}>
+                  <div className={`relative w-full h-3 md:h-4 rounded-full overflow-visible flex ${isWinner ? "bg-zinc-800/80 border border-emerald-500/25" : "bg-zinc-800"}`}>
                     {guiltyPct > 0 ? (
                       <div
-                        className="bg-red-600/90 h-full min-w-0 flex items-center justify-end pr-1 shrink-0"
+                        className="bg-red-600/90 h-full min-w-0 flex items-center justify-end pr-1 shrink-0 rounded-l-full"
                         style={{ width: `${guiltyPct}%` }}
                       >
-                        {guiltyPct >= 50 ? (
+                        {guiltyPct >= 50 && p.guilty !== p.not_guilty ? (
                           <span className="text-[9px] md:text-[10px] font-bold text-red-200/90 whitespace-nowrap">AI 대법관 최종 확정</span>
                         ) : null}
                       </div>
                     ) : null}
                     {notGuiltyPct > 0 ? (
                       <div
-                        className="bg-blue-600/90 h-full min-w-0 flex items-center justify-start pl-1 shrink-0"
+                        className="bg-blue-600/90 h-full min-w-0 flex items-center justify-start pl-1 shrink-0 rounded-r-full"
                         style={{ width: `${notGuiltyPct}%` }}
                       >
-                        {notGuiltyPct >= 50 ? (
+                        {notGuiltyPct >= 50 && p.guilty !== p.not_guilty ? (
                           <span className="text-[9px] md:text-[10px] font-bold text-blue-200/90 whitespace-nowrap">AI 대법관 최종 확정</span>
                         ) : null}
                       </div>
+                    ) : null}
+                    {total > 0 && p.guilty === p.not_guilty ? (
+                      <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex h-5 w-5 items-center justify-center rounded-full border-2 border-amber-400/90 bg-zinc-900 text-xs font-black text-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.5)]" aria-hidden>⚡</span>
                     ) : null}
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-zinc-500">
                     <span className="text-red-400/80">유죄 {guiltyPct}% ({p.guilty}표)</span>
                     <span className="text-blue-400/80">무죄 {notGuiltyPct}% ({p.not_guilty}표)</span>
                   </div>
+                  {total > 0 ? (
+                    <p className="text-[11px] text-center text-zinc-400 mt-1">
+                      {p.guilty === p.not_guilty ? (
+                        <>배심원 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명이 참여했으나, 누구도 승리를 장담할 수 없는 팽팽한 대립이 이어졌습니다.</>
+                      ) : (
+                        <>지금까지 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명의 배심원이 참여했습니다.</>
+                      )}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-center text-zinc-500 mt-1">투표가 없었습니다.</p>
+                  )}
                 </div>
 
                 {/* 하단 버튼: 판결문 전문 보기 / 나도 사연 올리기 */}
@@ -3213,17 +3172,20 @@ function HomeContent() {
                               </div>
                             ) : null}
 
-                            {/* 유죄 vs 무죄 게이지 바 */}
+                            {/* 유죄 vs 무죄 게이지 바 (동점 시 번개) */}
                             <div className="mb-3">
-                              <div className="flex h-3 rounded-full overflow-hidden bg-zinc-800 border border-zinc-700/80 shadow-inner">
+                              <div className="relative flex h-3 rounded-full overflow-visible bg-zinc-800 border border-zinc-700/80 shadow-inner">
                                 <div
-                                  className="h-full bg-red-500/90 transition-all duration-500"
+                                  className="h-full bg-red-500/90 transition-all duration-500 rounded-l-full"
                                   style={{ width: `${guiltyPct}%` }}
                                 />
                                 <div
-                                  className="h-full bg-blue-500/90 transition-all duration-500"
+                                  className="h-full bg-blue-500/90 transition-all duration-500 rounded-r-full"
                                   style={{ width: `${notGuiltyPct}%` }}
                                 />
+                                {totalVotes > 0 && p.guilty === p.not_guilty ? (
+                                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex h-5 w-5 items-center justify-center rounded-full border-2 border-amber-400/90 bg-zinc-900 text-xs font-black text-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.5)]" aria-hidden>⚡</span>
+                                ) : null}
                               </div>
                               <div className="flex justify-between mt-1.5 text-[10px] font-bold">
                                 <span className="text-red-400">유죄 {guiltyPct}% ({p.guilty.toLocaleString()}표)</span>
@@ -3231,9 +3193,17 @@ function HomeContent() {
                               </div>
                             </div>
 
-                            {/* 참여 인원 강조 */}
+                            {/* 참여 인원 — 판결문 상세와 동일 (동점 시 별도 문구) */}
                             <p className="text-xs text-zinc-400 font-semibold">
-                              총 <span className="text-emerald-300 font-black">{totalVotes.toLocaleString()}</span>명의 배심원이 참여한 사건
+                              {totalVotes > 0 ? (
+                                p.guilty === p.not_guilty ? (
+                                  <>배심원 <span className="font-semibold text-amber-300">{totalVotes.toLocaleString("ko-KR")}</span>명이 참여했으나, 누구도 승리를 장담할 수 없는 팽팽한 대립이 이어졌습니다.</>
+                                ) : (
+                                  <>지금까지 <span className="font-semibold text-amber-300">{totalVotes.toLocaleString("ko-KR")}</span>명의 배심원이 참여했습니다.</>
+                                )
+                              ) : (
+                                <>투표가 없었습니다.</>
+                              )}
                             </p>
 
                             {/* 배심원 한마디 유도 */}
