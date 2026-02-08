@@ -7,6 +7,7 @@ import { Logo } from "@/app/components/Logo";
 import { CoupangBanner } from "@/app/components/CoupangBanner";
 import { Noto_Serif_KR } from "next/font/google";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
+import { maskCommentIp } from "@/lib/comment";
 
 const notoSerif = Noto_Serif_KR({
   weight: ["400", "600", "700"],
@@ -128,6 +129,7 @@ function HallOfFameContent() {
   const [error, setError] = useState<string | null>(null);
   const [selectedPost, setSelectedPost] = useState<PostPreview | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [jurorLabels, setJurorLabels] = useState<Record<string, string>>({});
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsError, setCommentsError] = useState<string | null>(null);
   const [commentInput, setCommentInput] = useState("");
@@ -370,6 +372,32 @@ function HallOfFameContent() {
       cancelled = true;
     };
   }, [selectedPost?.id]);
+
+  // 배심원 라벨링: 글 작성순(created_at 오름차순)으로 원고 / 배심원 1, 2, ...
+  const getCommentLabelKey = (c: { id: string; author_id: string | null; is_post_author?: boolean }) =>
+    c.author_id ?? (c.is_post_author ? "__author__" : `comment_${c.id}`);
+  useEffect(() => {
+    if (!selectedPost) {
+      setJurorLabels({});
+      return;
+    }
+    const sorted = [...comments].sort(
+      (a, b) =>
+        new Date(a.created_at ?? 0).getTime() -
+        new Date(b.created_at ?? 0).getTime(),
+    );
+    const map: Record<string, string> = {};
+    let idx = 1;
+    for (const c of sorted) {
+      const key = getCommentLabelKey(c);
+      if (c.is_post_author) {
+        if (!map[key]) map[key] = "원고";
+      } else {
+        if (!map[key]) map[key] = `배심원 ${idx++}`;
+      }
+    }
+    setJurorLabels(map);
+  }, [comments]);
 
   useEffect(() => {
     if (!commentDeleteTargetId) return;
@@ -1628,10 +1656,8 @@ function HallOfFameContent() {
                         }`}>
                           <div className="mb-1 flex items-center gap-2 text-[11px]">
                             <span className={`font-bold shrink-0 ${isOperator ? "text-amber-400" : "text-amber-300"}`}>
-                              {c.is_post_author ? "원고" : "배심원"}
-                              {c.ip_address
-                                ? ` (${c.ip_address.trim().split(".").slice(0, 2).join(".")})`
-                                : ""}
+                              {jurorLabels[getCommentLabelKey(c)] ?? "배심원"}
+                              {maskCommentIp(c.ip_address) ? ` (${maskCommentIp(c.ip_address)})` : ""}
                             </span>
                             {isOperator ? (
                               <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/30 px-2 py-0.5 text-[10px] font-black text-amber-200 border border-amber-500/50">
@@ -1772,10 +1798,8 @@ function HallOfFameContent() {
                               <div className="mb-1 flex flex-wrap items-center gap-1.5">
                                 {!isReplyOperator ? (
                                   <span className="font-bold shrink-0 whitespace-nowrap text-amber-500/80 text-[10px] sm:text-[11px]">
-                                    {reply.is_post_author ? "원고" : "배심원"}
-                                    {reply.ip_address
-                                      ? ` (${reply.ip_address.trim().split(".").slice(0, 2).join(".")})`
-                                      : ""}
+                                    {jurorLabels[getCommentLabelKey(reply)] ?? "배심원"}
+                                    {maskCommentIp(reply.ip_address) ? ` (${maskCommentIp(reply.ip_address)})` : ""}
                                   </span>
                                 ) : null}
                                 {isReplyOperator ? (
