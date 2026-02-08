@@ -627,23 +627,32 @@ function HallOfFameContent() {
     }
   };
 
-  // 주차별 명예의 전당 계산 (현재 주차는 아직 끝나지 않았으므로 제외)
   const weeklyWinners = useMemo(() => {
     const ended = posts.filter((p) => !isVotingOpen(p.created_at, p.voting_ended_at) && p.guilty > 0);
     const currentWeek = getCurrentWeek();
 
-    const byWeek = new Map<string, { year: number; week: number; post: typeof ended[0] }>();
+    const byWeek = new Map<string, { year: number; week: number; post: (typeof ended)[0] }>();
 
     for (const p of ended) {
       const key = getWeekFromEndAt(p.voting_ended_at, p.created_at);
       if (!key) continue;
-
-      // 투표 종료 주차가 현재 주차와 같으면 아직 주가 끝나지 않은 것이므로 제외
       if (key.year === currentWeek.year && key.week === currentWeek.week) continue;
 
       const k = `${key.year}-${key.week}`;
+      const totalVotes = p.guilty + p.not_guilty;
       const cur = byWeek.get(k);
-      if (!cur || p.guilty > cur.post.guilty) byWeek.set(k, { ...key, post: p });
+
+      if (!cur) {
+        byWeek.set(k, { ...key, post: p });
+        continue;
+      }
+      const curTotal = cur.post.guilty + cur.post.not_guilty;
+      if (totalVotes > curTotal) {
+        byWeek.set(k, { ...key, post: p });
+      } else if (totalVotes === curTotal && p.created_at && cur.post.created_at && p.created_at < cur.post.created_at) {
+        // 동점이면 먼저 올린 글(created_at 더 이른 글) 등록
+        byWeek.set(k, { ...key, post: p });
+      }
     }
 
     return Array.from(byWeek.values()).sort((a, b) => b.year - a.year || b.week - a.week);
@@ -850,20 +859,19 @@ function HallOfFameContent() {
                   tabIndex={0}
                   onClick={() => setSelectedPost(p)}
                   onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
-                  className="group relative w-full max-w-[calc(100vw-2rem)] mx-auto rounded-[1.75rem] border border-zinc-700/80 bg-zinc-950/60 p-4 md:p-6 hover:border-zinc-600/80 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all opacity-90 saturate-[0.85] hover:opacity-95 hover:saturate-100"
+                  className="group relative w-full max-w-[calc(100vw-2rem)] mx-auto rounded-[1.75rem] p-4 md:p-6 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all border border-emerald-500/25 bg-gradient-to-br from-emerald-500/15 via-zinc-800/50 to-zinc-950/95 hover:border-emerald-400/35 hover:from-emerald-400/20 hover:via-zinc-700/60 hover:to-zinc-900/95 shadow-[0_0_0_1px_rgba(52,211,153,0.08)_inset,0_4px_24px_rgba(0,0,0,0.4),0_0_40px_rgba(52,211,153,0.08)] hover:shadow-[0_0_0_1px_rgba(52,211,153,0.12)_inset,0_8px_32px_rgba(0,0,0,0.45),0_0_50px_rgba(52,211,153,0.1)]"
                   style={{
-                    backgroundImage: "repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(255,255,255,0.02) 6px, rgba(255,255,255,0.02) 12px)",
+                    backgroundImage: "repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(52,211,153,0.04) 6px, rgba(52,211,153,0.04) 12px)",
                   }}
                 >
-                  {/* [판결 완료] 도장 스탬프 */}
                   <div
                     className="absolute top-4 right-4 md:top-5 md:right-5 z-10 pointer-events-none select-none"
                     style={{ transform: "rotate(12deg)" }}
                   >
-                    <span className="inline-block px-2 py-1 md:px-2.5 md:py-1.5 border-2 border-red-600/90 text-red-500/95 text-[10px] md:text-xs font-black tracking-widest rounded shadow-md bg-black/20">
-                      [ 판 결 완 료 ]
-                    </span>
-                  </div>
+                      <span className="inline-block px-2 py-1 md:px-2.5 md:py-1.5 border-2 border-red-600/90 text-red-500/95 text-[10px] md:text-xs font-black tracking-widest rounded shadow-md bg-black/20">
+                        [ 판 결 완 료 ]
+                      </span>
+                    </div>
 
                   {/* 상단: 카테고리·주차(좌) + 사건번호·메뉴(우측) */}
                   <div className="flex items-center justify-between mb-2 text-[11px] text-zinc-500">
@@ -873,7 +881,7 @@ function HallOfFameContent() {
                           {p.category}
                         </span>
                       ) : null}
-                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-amber-500/40 bg-amber-500/10 text-amber-500/90">
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-200 shadow-[0_0_12px_rgba(52,211,153,0.2)]">
                         {year}년 제{week}주
                       </span>
                     </div>
@@ -971,7 +979,7 @@ function HallOfFameContent() {
 
                   {/* 제목 + 내용 요약 */}
                   <div className="mb-2 pr-16">
-                    <h4 className="text-base md:text-lg font-bold text-zinc-300 group-hover:text-amber-400/90 transition line-clamp-1 text-left break-all">
+                    <h4 className="text-base md:text-lg font-bold text-zinc-200 group-hover:text-emerald-100 transition line-clamp-1 text-left break-all">
                       {p.title}
                     </h4>
                     {p.content ? (
@@ -996,7 +1004,7 @@ function HallOfFameContent() {
 
                   {/* 최종 스코어 보드 — 하단 전체 폭 바 + AI 대법관 확정 라벨 */}
                   <div className="mt-auto space-y-2">
-                    <div className="w-full h-3 md:h-4 bg-zinc-800 rounded-full overflow-hidden flex">
+                    <div className="w-full h-3 md:h-4 bg-zinc-800/80 rounded-full overflow-hidden flex border border-emerald-500/25">
                       {guiltyPct > 0 ? (
                         <div
                           className="bg-red-600/90 h-full min-w-0 flex items-center justify-end pr-1 shrink-0"
@@ -1029,7 +1037,7 @@ function HallOfFameContent() {
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); setSelectedPost(p); }}
-                      className="flex-1 rounded-xl border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-4 py-2.5 text-xs md:text-sm font-bold transition"
+                      className="flex-1 rounded-xl border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 px-4 py-2.5 text-xs md:text-sm font-bold transition shadow-[0_0_16px_rgba(52,211,153,0.15)]"
                     >
                       AI 판결문 전문 보기
                     </button>
@@ -1064,9 +1072,9 @@ function HallOfFameContent() {
               setPostMenuOpenId(null);
             }}
           />
-          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-zinc-800 bg-zinc-950 shadow-[0_0_60px_rgba(0,0,0,0.8)]">
-            <div className="sticky top-0 z-10 flex items-center justify-between gap-4 p-6 border-b border-zinc-800 bg-zinc-950">
-              <h3 className="text-lg font-black text-amber-500">판결문 상세</h3>
+          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-emerald-500/25 bg-gradient-to-b from-emerald-500/10 to-zinc-950 shadow-[0_0_0_1px_rgba(52,211,153,0.08)_inset,0_0_60px_rgba(0,0,0,0.6),0_0_40px_rgba(52,211,153,0.1)]">
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-4 p-6 border-b border-emerald-500/30 bg-zinc-950/95 backdrop-blur-sm">
+              <h3 className="text-lg font-black text-emerald-200">판결문 상세</h3>
               <div className="flex items-center gap-2">
                 {selectedPost.case_number != null ? (
                   <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-zinc-400 whitespace-nowrap leading-none rounded-full border border-zinc-700/80 bg-zinc-900/60">
@@ -1076,7 +1084,7 @@ function HallOfFameContent() {
                 <button
                   type="button"
                   onClick={() => setSelectedPost(null)}
-                  className="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-800 transition"
+                  className="rounded-2xl border border-emerald-500/40 bg-emerald-500/15 px-4 py-2 text-sm font-bold text-emerald-200 hover:bg-emerald-500/25 transition"
                 >
                   닫기
                 </button>
@@ -2145,8 +2153,8 @@ function HallOfFameContent() {
             onClick={closeAccuse}
           />
 
-          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-zinc-800 bg-zinc-950 shadow-[0_0_60px_rgba(0,0,0,0.7)]">
-            <div className="p-6 md:p-8 border-b border-zinc-900 flex items-start justify-between gap-6">
+          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-emerald-500/25 bg-gradient-to-b from-emerald-500/10 to-zinc-950 shadow-[0_0_0_1px_rgba(52,211,153,0.08)_inset,0_0_60px_rgba(0,0,0,0.6),0_0_40px_rgba(52,211,153,0.1)]">
+            <div className="p-6 md:p-8 border-b border-emerald-500/30 bg-zinc-950/95 backdrop-blur-sm flex items-start justify-between gap-6">
               <div>
                 <div className="inline-flex items-center gap-2 text-xs font-black tracking-widest uppercase text-amber-500">
                   <span className="h-2 w-2 rounded-full bg-amber-500 shadow-[0_0_18px_rgba(245,158,11,0.6)]" />
@@ -2364,7 +2372,7 @@ function HallOfFameContent() {
               {judgeResult ? (
                 <div
                   ref={verdictDetailRef}
-                  className="rounded-[2rem] border border-zinc-800 bg-zinc-950/60 p-5 md:p-6"
+                  className="rounded-[2rem] border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-zinc-900/80 to-zinc-950/95 p-5 md:p-6 shadow-[0_0_0_1px_rgba(52,211,153,0.08)_inset]"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>

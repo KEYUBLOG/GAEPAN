@@ -110,15 +110,11 @@ function OngoingTrialsContent() {
   }>({ type: null, id: null });
   const [reportReason, setReportReason] = useState<string>("욕설/비하");
 
-  // 오늘의 개판(가장 핫한 진행 중 재판)
+  // 오늘의 개판(투표수 많은 순)
   const topOfDayPost = useMemo(() => {
     if (posts.length === 0) return null;
-    const urgent = posts.find((p) => isUrgent(p.created_at));
-    if (urgent) return urgent;
-    return posts.reduce<PostPreview | null>((best, p) => {
-      if (!best) return p;
-      return p.guilty >= best.guilty ? p : best;
-    }, null);
+    const byVotes = [...posts].sort((a, b) => (b.guilty + b.not_guilty) - (a.guilty + a.not_guilty));
+    return byVotes[0] ?? null;
   }, [posts]);
   const [deletePostId, setDeletePostId] = useState<string | null>(null);
   const [deletePassword, setDeletePassword] = useState("");

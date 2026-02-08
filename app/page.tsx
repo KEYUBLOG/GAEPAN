@@ -607,7 +607,7 @@ function HomeContent() {
               .select(postColumns)
               .neq("status", "판결불가")
               .order("created_at", { ascending: false })
-              .limit(10),
+              .limit(100),
             supabase.from("blocked_ips").select("ip_address"),
           ]);
 
@@ -1451,11 +1451,8 @@ function HomeContent() {
   const filteredTopGuiltyPost = useMemo(() => {
     const ongoingPosts = filteredRecentPosts.filter((p) => isVotingOpen(p.created_at, p.voting_ended_at));
     if (ongoingPosts.length === 0) return null;
-    const urgent = ongoingPosts.find((p) => isUrgent(p.created_at));
-    if (urgent) return urgent;
-    return ongoingPosts.reduce((best, p) =>
-      p.guilty >= (best?.guilty ?? 0) ? p : best,
-    );
+    const byVotes = [...ongoingPosts].sort((a, b) => (b.guilty + b.not_guilty) - (a.guilty + a.not_guilty));
+    return byVotes[0] ?? null;
   }, [filteredRecentPosts]);
 
   // 오늘의 개판 카드용 댓글 수 (배심원 참여 문구)
@@ -1484,18 +1481,28 @@ function HomeContent() {
     const ended = recentPosts.filter((p) => !isVotingOpen(p.created_at, p.voting_ended_at) && p.guilty > 0);
     const currentWeek = getCurrentWeek();
 
-    const byWeek = new Map<string, { year: number; week: number; post: typeof ended[0] }>();
+    const byWeek = new Map<string, { year: number; week: number; post: (typeof ended)[0] }>();
 
     for (const p of ended) {
       const key = getWeekFromEndAt(p.voting_ended_at, p.created_at);
       if (!key) continue;
-
-      // 투표 종료 주차가 현재 주차와 같으면 아직 주가 끝나지 않은 것이므로 제외
       if (key.year === currentWeek.year && key.week === currentWeek.week) continue;
 
       const k = `${key.year}-${key.week}`;
+      const totalVotes = p.guilty + p.not_guilty;
       const cur = byWeek.get(k);
-      if (!cur || p.guilty > cur.post.guilty) byWeek.set(k, { ...key, post: p });
+
+      if (!cur) {
+        byWeek.set(k, { ...key, post: p });
+        continue;
+      }
+      const curTotal = cur.post.guilty + cur.post.not_guilty;
+      if (totalVotes > curTotal) {
+        byWeek.set(k, { ...key, post: p });
+      } else if (totalVotes === curTotal && p.created_at && cur.post.created_at && p.created_at < cur.post.created_at) {
+        // 동점이면 먼저 올린 글(created_at 더 이른 글) 등록
+        byWeek.set(k, { ...key, post: p });
+      }
     }
     return Array.from(byWeek.values()).sort((a, b) => b.year - a.year || b.week - a.week);
   }, [recentPosts]);
@@ -3221,29 +3228,24 @@ function HomeContent() {
                   <p className="text-zinc-500 text-xs sm:text-sm text-center py-8">아직 기록된 주차가 없습니다.</p>
                 ) : (
                   <>
-                    {/* 최신 글 1개만 표시 */}
-                    {weeklyWinners.slice(0, 1).map(({ year, week, post }) => (
-                      <div
-                        key={`${year}-${week}`}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setSelectedPost(post)}
-                        onKeyDown={(e) => e.key === "Enter" && setSelectedPost(post)}
-                        className="block rounded-xl border border-zinc-800 bg-zinc-950/80 p-4 hover:border-amber-500/40 transition cursor-pointer"
-                      >
-                        <span className="text-xs font-bold text-amber-500">
-                          {year}년 제{week}주
-                        </span>
-                        <p className="font-bold text-sm sm:text-base text-zinc-100 mt-1 line-clamp-1">{post.title}</p>
-                        <p className="text-xs text-zinc-500 mt-1">유죄 {post.guilty}표 · 무죄 {post.not_guilty}표</p>
-                      </div>
-                    ))}
-                    {/* 더보기 버튼 */}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedPost(weeklyWinners[0].post)}
+                      onKeyDown={(e) => e.key === "Enter" && setSelectedPost(weeklyWinners[0].post)}
+                      className="block rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 p-4 hover:border-emerald-400/40 transition cursor-pointer shadow-[0_0_16px_rgba(52,211,153,0.12)]"
+                    >
+                      <span className="text-xs font-bold text-emerald-200">
+                        {weeklyWinners[0].year}년 제{weeklyWinners[0].week}주
+                      </span>
+                      <p className="font-bold text-sm sm:text-base text-zinc-100 mt-1 line-clamp-1">{weeklyWinners[0].post.title}</p>
+                      <p className="text-xs text-zinc-500 mt-1">유죄 {weeklyWinners[0].post.guilty}표 · 무죄 {weeklyWinners[0].post.not_guilty}표</p>
+                    </div>
                     {weeklyWinners.length > 1 ? (
                       <div className="mt-6 text-center">
                         <Link
                           href="/hall-of-fame"
-                          className="inline-block rounded-xl border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-6 md:px-8 py-2 md:py-3 text-xs sm:text-sm font-bold transition"
+                          className="inline-block rounded-xl border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 px-6 md:px-8 py-2 md:py-3 text-xs sm:text-sm font-bold transition shadow-[0_0_16px_rgba(52,211,153,0.15)]"
                         >
                           더보기 ({weeklyWinners.length - 1}건 더)
                         </Link>
@@ -3479,9 +3481,9 @@ function HomeContent() {
               setPostMenuOpenId(null);
             }}
           />
-          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-zinc-800 bg-zinc-950 shadow-[0_0_60px_rgba(0,0,0,0.8)]">
-            <div className="sticky top-0 z-10 flex items-center justify-between gap-4 px-3 py-4 md:p-6 border-b border-zinc-800 bg-zinc-950">
-              <h3 className="text-lg font-black text-amber-500">판결문 상세</h3>
+          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-emerald-500/25 bg-gradient-to-b from-emerald-500/10 to-zinc-950 shadow-[0_0_0_1px_rgba(52,211,153,0.08)_inset,0_0_60px_rgba(0,0,0,0.6),0_0_40px_rgba(52,211,153,0.1)]">
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-4 px-3 py-4 md:p-6 border-b border-emerald-500/30 bg-zinc-950/95 backdrop-blur-sm">
+              <h3 className="text-lg font-black text-emerald-200">판결문 상세</h3>
               <div className="flex items-center gap-2">
                 {selectedPost.case_number != null ? (
                   <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-zinc-400 whitespace-nowrap leading-none rounded-full border border-zinc-700/80 bg-zinc-900/60">
@@ -3491,7 +3493,7 @@ function HomeContent() {
                 <button
                   type="button"
                   onClick={() => setSelectedPost(null)}
-                  className="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-800 transition"
+                  className="rounded-2xl border border-emerald-500/40 bg-emerald-500/15 px-4 py-2 text-sm font-bold text-emerald-200 hover:bg-emerald-500/25 transition"
                 >
                   닫기
                 </button>
