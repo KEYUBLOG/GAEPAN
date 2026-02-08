@@ -2130,14 +2130,14 @@ function HallOfFameContent() {
 
                 <div>
                   <label className="block text-xs font-black tracking-widest uppercase text-zinc-400">
-                    사건 경위(상세 내용)
+                    상세 내용
                   </label>
                   <textarea
                     value={form.details}
                     onChange={(e) => setForm((p) => ({ ...p, details: e.target.value }))}
                     disabled={isReviewing}
                     className="mt-2 w-full min-h-[160px] resize-y rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/10 transition"
-                    placeholder={`언제/어디서/누가/무슨 말을/무슨 행동을 했는지 순서대로 적으세요.\n정리 안 하면 판사도 안 봅니다.`}
+                    placeholder="예: 회식 날 술자리에서 친구가 한 말 때문에 3일째 말도 안 하고 싸우는 중입니다. 그때 한 말이 너무 기억나서 화가 나요. AI 판사님께 공정한 판결 부탁드립니다."
                     maxLength={5000}
                     required
                   />
