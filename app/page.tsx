@@ -1540,6 +1540,13 @@ function HomeContent() {
     return [...inWinners, ...notInWinners];
   }, [recentPosts, weeklyWinners]);
 
+  // 명예의 전당에 올라간 글의 주차 정보 (판결 완료 카드 배지용)
+  const winnerWeekByPostId = useMemo(() => {
+    const m = new Map<string, { year: number; week: number }>();
+    weeklyWinners.forEach((w) => m.set(w.post.id, { year: w.year, week: w.week }));
+    return m;
+  }, [weeklyWinners]);
+
   // 삭제 비밀번호 모달 열릴 때 입력창 포커스
   useEffect(() => {
     if (!deletePostId) return;
@@ -2973,6 +2980,8 @@ function HomeContent() {
                 const isDefense =
                   p.trial_type === "DEFENSE" ||
                   (verdictText.includes("원고 무죄") && p.trial_type !== "ACCUSATION");
+                const isWinner = winnerWeekByPostId.has(p.id);
+                const weekInfo = winnerWeekByPostId.get(p.id);
                 return (
                 <article
                   key={p.id}
@@ -2980,9 +2989,15 @@ function HomeContent() {
                   tabIndex={0}
                   onClick={() => setSelectedPost(p)}
                   onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
-                  className="group relative w-full min-w-0 max-w-full mx-auto rounded-[1.25rem] md:rounded-[1.75rem] border border-zinc-700/80 bg-zinc-950/60 p-4 md:p-6 hover:border-zinc-600/80 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all opacity-90 saturate-[0.85] hover:opacity-95 hover:saturate-100"
+                  className={
+                    isWinner
+                      ? "group relative w-full min-w-0 max-w-full mx-auto rounded-[1.25rem] md:rounded-[1.75rem] border border-emerald-500/25 bg-gradient-to-br from-emerald-500/15 via-zinc-800/50 to-zinc-950/95 p-4 md:p-6 hover:border-emerald-400/35 hover:from-emerald-400/20 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all shadow-[0_0_0_1px_rgba(52,211,153,0.08)_inset,0_4px_24px_rgba(0,0,0,0.4),0_0_40px_rgba(52,211,153,0.08)] hover:shadow-[0_0_0_1px_rgba(52,211,153,0.12)_inset,0_8px_32px_rgba(0,0,0,0.45),0_0_50px_rgba(52,211,153,0.1)]"
+                      : "group relative w-full min-w-0 max-w-full mx-auto rounded-[1.25rem] md:rounded-[1.75rem] border border-zinc-700/80 bg-zinc-950/60 p-4 md:p-6 hover:border-zinc-600/80 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all opacity-90 saturate-[0.85] hover:opacity-95 hover:saturate-100"
+                  }
                   style={{
-                    backgroundImage: "repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(255,255,255,0.02) 6px, rgba(255,255,255,0.02) 12px)",
+                    backgroundImage: isWinner
+                      ? "repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(52,211,153,0.04) 6px, rgba(52,211,153,0.04) 12px)"
+                      : "repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(255,255,255,0.02) 6px, rgba(255,255,255,0.02) 12px)",
                   }}
                 >
                 {/* [판결 완료] 도장 스탬프 — 우측 상단 비스듬히 */}
@@ -2995,12 +3010,17 @@ function HomeContent() {
                   </span>
                 </div>
 
-                {/* 상단: 카테고리(좌) + 사건번호·메뉴(우측) */}
+                {/* 상단: 카테고리·주차(좌) + 사건번호·메뉴(우측) */}
                 <div className="flex items-center justify-between mb-2 text-[11px] text-zinc-500">
                   <div className="flex items-center gap-2 shrink-0">
                     {p.category ? (
                       <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-800/80 border border-zinc-700 text-zinc-500">
                         {p.category}
+                      </span>
+                    ) : null}
+                    {isWinner && weekInfo ? (
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-200 shadow-[0_0_12px_rgba(52,211,153,0.2)]">
+                        {weekInfo.year}년 제{weekInfo.week}주
                       </span>
                     ) : null}
                   </div>
@@ -3121,7 +3141,7 @@ function HomeContent() {
 
                 {/* 제목 + 내용 요약 */}
                 <div className="mb-2 pr-16">
-                  <h4 className="text-base md:text-lg font-bold text-zinc-300 group-hover:text-amber-400/90 transition line-clamp-1 text-left break-all">
+                  <h4 className={`text-base md:text-lg font-bold line-clamp-1 text-left break-all transition ${isWinner ? "text-zinc-100 group-hover:text-emerald-100" : "text-zinc-300 group-hover:text-amber-400/90"}`}>
                     {p.title}
                   </h4>
                   {p.content ? (
@@ -3146,7 +3166,7 @@ function HomeContent() {
 
                 {/* 최종 스코어 보드 — 하단 전체 폭 바 + AI 대법관 확정 라벨 (0%인 쪽은 렌더 안 함 → 색 섞임 방지) */}
                 <div className="mt-auto space-y-2">
-                  <div className="w-full h-3 md:h-4 bg-zinc-800 rounded-full overflow-hidden flex">
+                  <div className={`w-full h-3 md:h-4 rounded-full overflow-hidden flex ${isWinner ? "bg-zinc-800/80 border border-emerald-500/25" : "bg-zinc-800"}`}>
                     {guiltyPct > 0 ? (
                       <div
                         className="bg-red-600/90 h-full min-w-0 flex items-center justify-end pr-1 shrink-0"
@@ -3182,7 +3202,7 @@ function HomeContent() {
                       e.stopPropagation();
                       setSelectedPost(p);
                     }}
-                    className="flex-1 rounded-xl border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-4 py-2.5 text-xs md:text-sm font-bold transition"
+                    className={isWinner ? "flex-1 rounded-xl border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 px-4 py-2.5 text-xs md:text-sm font-bold transition shadow-[0_0_16px_rgba(52,211,153,0.15)]" : "flex-1 rounded-xl border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-4 py-2.5 text-xs md:text-sm font-bold transition"}
                   >
                     AI 판결문 전문 보기
                   </button>

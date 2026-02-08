@@ -45,6 +45,35 @@ function toRatioNumber(value: unknown): number | null {
   return null;
 }
 
+function getVotingEndWeek(createdAt: string | null): { year: number; week: number } | null {
+  if (!createdAt) return null;
+  const endMs = new Date(createdAt).getTime() + TRIAL_DURATION_MS;
+  const d = new Date(endMs);
+  const start = new Date(d.getFullYear(), 0, 1);
+  const days = Math.floor((endMs - start.getTime()) / 86400000);
+  const week = Math.ceil((days + d.getDay() + 1) / 7);
+  return { year: d.getFullYear(), week: Math.min(week, 53) };
+}
+
+function getWeekFromEndAt(endedAt: string | null, createdAt: string | null): { year: number; week: number } | null {
+  if (endedAt) {
+    const d = new Date(endedAt);
+    const start = new Date(d.getFullYear(), 0, 1);
+    const days = Math.floor((d.getTime() - start.getTime()) / 86400000);
+    const week = Math.ceil((days + start.getDay() + 1) / 7);
+    return { year: d.getFullYear(), week: Math.min(week, 53) };
+  }
+  return getVotingEndWeek(createdAt);
+}
+
+function getCurrentWeek(): { year: number; week: number } {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 1);
+  const days = Math.floor((now.getTime() - start.getTime()) / 86400000);
+  const week = Math.ceil((days + start.getDay() + 1) / 7);
+  return { year: now.getFullYear(), week: Math.min(week, 53) };
+}
+
 type PostPreview = {
   id: string;
   title: string;
@@ -601,6 +630,38 @@ function CompletedTrialsContent() {
     return sorted;
   }, [posts, selectedCategory, sort]);
 
+  // 주차별 명예의 전당 1위 (판결 완료 카드 배지용)
+  const weeklyWinners = useMemo(() => {
+    const ended = posts.filter((p) => !isVotingOpen(p.created_at, p.voting_ended_at) && p.guilty > 0);
+    const currentWeek = getCurrentWeek();
+    const byWeek = new Map<string, { year: number; week: number; post: (typeof ended)[0] }>();
+    for (const p of ended) {
+      const key = getWeekFromEndAt(p.voting_ended_at, p.created_at);
+      if (!key) continue;
+      if (key.year === currentWeek.year && key.week === currentWeek.week) continue;
+      const k = `${key.year}-${key.week}`;
+      const totalVotes = p.guilty + p.not_guilty;
+      const cur = byWeek.get(k);
+      if (!cur) {
+        byWeek.set(k, { ...key, post: p });
+        continue;
+      }
+      const curTotal = cur.post.guilty + cur.post.not_guilty;
+      if (totalVotes > curTotal) {
+        byWeek.set(k, { ...key, post: p });
+      } else if (totalVotes === curTotal && p.created_at && cur.post.created_at && p.created_at < cur.post.created_at) {
+        byWeek.set(k, { ...key, post: p });
+      }
+    }
+    return Array.from(byWeek.values()).sort((a, b) => b.year - a.year || b.week - a.week);
+  }, [posts]);
+
+  const winnerWeekByPostId = useMemo(() => {
+    const m = new Map<string, { year: number; week: number }>();
+    weeklyWinners.forEach((w) => m.set(w.post.id, { year: w.year, week: w.week }));
+    return m;
+  }, [weeklyWinners]);
+
   const closeAccuse = () => {
     setIsReviewing(false);
     setIsAccuseOpen(false);
@@ -840,6 +901,8 @@ function CompletedTrialsContent() {
               const total = p.guilty + p.not_guilty;
               const guiltyPct = total ? Math.round((p.guilty / total) * 100) : 0;
               const notGuiltyPct = total ? Math.round((p.not_guilty / total) * 100) : 0;
+              const isWinner = winnerWeekByPostId.has(p.id);
+              const weekInfo = winnerWeekByPostId.get(p.id);
               return (
               <article
                 key={p.id}
@@ -847,9 +910,15 @@ function CompletedTrialsContent() {
                 tabIndex={0}
                 onClick={() => setSelectedPost(p)}
                 onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
-                className="group relative w-full max-w-[calc(100vw-2rem)] mx-auto rounded-[1.75rem] border border-zinc-700/80 bg-zinc-950/60 p-4 md:p-6 hover:border-zinc-600/80 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all opacity-90 saturate-[0.85] hover:opacity-95 hover:saturate-100"
+                className={
+                  isWinner
+                    ? "group relative w-full max-w-[calc(100vw-2rem)] mx-auto rounded-[1.75rem] p-4 md:p-6 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all border border-emerald-500/25 bg-gradient-to-br from-emerald-500/15 via-zinc-800/50 to-zinc-950/95 hover:border-emerald-400/35 hover:from-emerald-400/20 shadow-[0_0_0_1px_rgba(52,211,153,0.08)_inset,0_4px_24px_rgba(0,0,0,0.4),0_0_40px_rgba(52,211,153,0.08)] hover:shadow-[0_0_0_1px_rgba(52,211,153,0.12)_inset,0_8px_32px_rgba(0,0,0,0.45),0_0_50px_rgba(52,211,153,0.1)]"
+                    : "group relative w-full max-w-[calc(100vw-2rem)] mx-auto rounded-[1.75rem] border border-zinc-700/80 bg-zinc-950/60 p-4 md:p-6 hover:border-zinc-600/80 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all opacity-90 saturate-[0.85] hover:opacity-95 hover:saturate-100"
+                }
                 style={{
-                  backgroundImage: "repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(255,255,255,0.02) 6px, rgba(255,255,255,0.02) 12px)",
+                  backgroundImage: isWinner
+                    ? "repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(52,211,153,0.04) 6px, rgba(52,211,153,0.04) 12px)"
+                    : "repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(255,255,255,0.02) 6px, rgba(255,255,255,0.02) 12px)",
                 }}
               >
                 {/* [판결 완료] 도장 스탬프 */}
@@ -862,12 +931,17 @@ function CompletedTrialsContent() {
                   </span>
                 </div>
 
-                {/* 상단: 카테고리(좌) + 사건번호·메뉴(우측) */}
+                {/* 상단: 카테고리·주차(좌) + 사건번호·메뉴(우측) */}
                 <div className="flex items-center justify-between mb-2 text-[11px] text-zinc-500">
                   <div className="flex items-center gap-2 shrink-0">
                     {p.category ? (
                       <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-800/80 border border-zinc-700 text-zinc-500">
                         {p.category}
+                      </span>
+                    ) : null}
+                    {isWinner && weekInfo ? (
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-200 shadow-[0_0_12px_rgba(52,211,153,0.2)]">
+                        {weekInfo.year}년 제{weekInfo.week}주
                       </span>
                     ) : null}
                   </div>
@@ -970,7 +1044,7 @@ function CompletedTrialsContent() {
 
                 {/* 제목 + 내용 요약 */}
                 <div className="mb-2 pr-16">
-                  <h4 className="text-base md:text-lg font-bold text-zinc-300 group-hover:text-amber-400/90 transition line-clamp-1 text-left break-all">
+                  <h4 className={`text-base md:text-lg font-bold line-clamp-1 text-left break-all transition ${isWinner ? "text-zinc-100 group-hover:text-emerald-100" : "text-zinc-300 group-hover:text-amber-400/90"}`}>
                     {p.title}
                   </h4>
                   {p.content ? (
@@ -995,7 +1069,7 @@ function CompletedTrialsContent() {
 
                 {/* 최종 스코어 보드 — 하단 전체 폭 바 + AI 대법관 확정 라벨 */}
                 <div className="mt-auto space-y-2">
-                  <div className="w-full h-3 md:h-4 bg-zinc-800 rounded-full overflow-hidden flex">
+                  <div className={`w-full h-3 md:h-4 rounded-full overflow-hidden flex ${isWinner ? "bg-zinc-800/80 border border-emerald-500/25" : "bg-zinc-800"}`}>
                     {guiltyPct > 0 ? (
                       <div
                         className="bg-red-600/90 h-full min-w-0 flex items-center justify-end pr-1 shrink-0"
@@ -1028,7 +1102,7 @@ function CompletedTrialsContent() {
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setSelectedPost(p); }}
-                    className="flex-1 rounded-xl border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-4 py-2.5 text-xs md:text-sm font-bold transition"
+                    className={isWinner ? "flex-1 rounded-xl border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 px-4 py-2.5 text-xs md:text-sm font-bold transition shadow-[0_0_16px_rgba(52,211,153,0.15)]" : "flex-1 rounded-xl border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-4 py-2.5 text-xs md:text-sm font-bold transition"}
                   >
                     AI 판결문 전문 보기
                   </button>
@@ -1048,6 +1122,9 @@ function CompletedTrialsContent() {
 
       {/* 판결문 상세 모달 */}
       {selectedPost ? (
+        (() => {
+          const isModalWinner = winnerWeekByPostId.has(selectedPost.id);
+          return (
         <div
           className="fixed inset-0 z-[110] flex items-center justify-center overflow-hidden p-4"
           role="dialog"
@@ -1063,9 +1140,21 @@ function CompletedTrialsContent() {
               setPostMenuOpenId(null);
             }}
           />
-          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-zinc-800 bg-zinc-950 shadow-[0_0_60px_rgba(0,0,0,0.8)]">
-            <div className="sticky top-0 z-10 flex items-center justify-between gap-4 p-6 border-b border-zinc-800 bg-zinc-950">
-              <h3 className="text-lg font-black text-amber-500">판결문 상세</h3>
+          <div
+            className={
+              isModalWinner
+                ? "relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-emerald-500/25 bg-gradient-to-b from-emerald-500/10 to-zinc-950 shadow-[0_0_0_1px_rgba(52,211,153,0.08)_inset,0_0_60px_rgba(0,0,0,0.6),0_0_40px_rgba(52,211,153,0.1)]"
+                : "relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-zinc-800 bg-zinc-950 shadow-[0_0_60px_rgba(0,0,0,0.8)]"
+            }
+          >
+            <div
+              className={
+                isModalWinner
+                  ? "sticky top-0 z-10 flex items-center justify-between gap-4 p-6 border-b border-emerald-500/30 bg-zinc-950/95 backdrop-blur-sm"
+                  : "sticky top-0 z-10 flex items-center justify-between gap-4 p-6 border-b border-zinc-800 bg-zinc-950"
+              }
+            >
+              <h3 className={isModalWinner ? "text-lg font-black text-emerald-200" : "text-lg font-black text-amber-500"}>판결문 상세</h3>
               <div className="flex items-center gap-2">
                 {selectedPost.case_number != null ? (
                   <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-zinc-400 whitespace-nowrap leading-none rounded-full border border-zinc-700/80 bg-zinc-900/60">
@@ -1075,7 +1164,11 @@ function CompletedTrialsContent() {
                 <button
                   type="button"
                   onClick={() => setSelectedPost(null)}
-                  className="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-800 transition"
+                  className={
+                    isModalWinner
+                      ? "rounded-2xl border border-emerald-500/40 bg-emerald-500/15 px-4 py-2 text-sm font-bold text-emerald-200 hover:bg-emerald-500/25 transition"
+                      : "rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-800 transition"
+                  }
                 >
                   닫기
                 </button>
@@ -1896,6 +1989,8 @@ function CompletedTrialsContent() {
             </div>
           </div>
         </div>
+        );
+        })()
       ) : null}
 
       {/* 판결문 수정 모달 */}
