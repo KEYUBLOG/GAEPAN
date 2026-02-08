@@ -236,7 +236,6 @@ function HomeContent() {
     }
   };
 
-  const [jurorLabels, setJurorLabels] = useState<Record<string, string>>({});
   const [recentPosts, setRecentPosts] = useState<PostPreview[]>([]);
   const [topGuiltyPost, setTopGuiltyPost] = useState<PostPreview | null>(null);
   const [topGuiltyPostCommentCount, setTopGuiltyPostCommentCount] = useState<number | null>(null);
@@ -255,6 +254,7 @@ function HomeContent() {
     likes: number;
     is_operator?: boolean;
     is_post_author?: boolean;
+    ip_address?: string | null;
   };
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
@@ -910,6 +910,7 @@ function HomeContent() {
             likes: Number(c.likes) || 0,
             is_operator: c.is_operator === true,
             is_post_author: c.is_post_author === true,
+            ip_address: c.ip_address ?? null,
           })),
         );
         if (Array.isArray(data.likedCommentIds)) {
@@ -928,32 +929,6 @@ function HomeContent() {
       cancelled = true;
     };
   }, [selectedPost?.id]);
-
-  // 배심원 라벨링: 작성자만 원고, 나머지는 배심원 1, 2, ... (익명은 댓글마다 별도 번호)
-  const getCommentLabelKey = (c: { id: string; author_id: string | null; is_post_author?: boolean }) =>
-    c.author_id ?? (c.is_post_author ? "__author__" : `comment_${c.id}`);
-  useEffect(() => {
-    if (!selectedPost) {
-      setJurorLabels({});
-      return;
-    }
-    const sorted = [...comments].sort(
-      (a, b) =>
-        new Date(a.created_at ?? 0).getTime() -
-        new Date(b.created_at ?? 0).getTime(),
-    );
-    const map: Record<string, string> = {};
-    let idx = 1;
-    for (const c of sorted) {
-      const key = getCommentLabelKey(c);
-      if (c.is_post_author) {
-        if (!map[key]) map[key] = "원고";
-      } else {
-        if (!map[key]) map[key] = `배심원 ${idx++}`;
-      }
-    }
-    setJurorLabels(map);
-  }, [comments]);
 
   // 판결문 상세 모달이 열려 있을 때 배경 스크롤 잠금
   useEffect(() => {
@@ -4259,7 +4234,10 @@ function HomeContent() {
                         }`}>
                           <div className="mb-1 flex flex-wrap items-center gap-1.5 sm:gap-2 text-[10px] sm:text-[11px] min-w-0">
                             <span className={`font-bold shrink-0 whitespace-nowrap ${isOperator ? "text-amber-400" : "text-amber-300"}`}>
-                              {jurorLabels[getCommentLabelKey(c)] ?? "배심원"}
+                              {c.is_post_author ? "원고" : "배심원"}
+                              {c.ip_address
+                                ? ` (${c.ip_address.trim().split(".").slice(0, 2).join(".")})`
+                                : ""}
                             </span>
                             {isOperator ? (
                               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/30 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-black text-amber-200 border border-amber-500/50 whitespace-nowrap">
@@ -4412,7 +4390,10 @@ function HomeContent() {
                               <div className="mb-1 flex flex-wrap items-center gap-1.5">
                                 {!isReplyOperator ? (
                                   <span className="font-bold shrink-0 whitespace-nowrap text-amber-500/80 text-[10px] sm:text-[11px]">
-                                    {jurorLabels[getCommentLabelKey(reply)] ?? "배심원"}
+                                    {reply.is_post_author ? "원고" : "배심원"}
+                                    {reply.ip_address
+                                      ? ` (${reply.ip_address.trim().split(".").slice(0, 2).join(".")})`
+                                      : ""}
                                   </span>
                                 ) : null}
                                 {isReplyOperator ? (

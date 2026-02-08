@@ -123,12 +123,16 @@ export async function GET(
         c.ip_address &&
         String(c.ip_address) === String(postAuthorIp)
       );
-      const { ip_address: _ip, ...rest } = c as { ip_address?: string } & typeof c;
       return {
-        ...rest,
-        likes: likeCountByCommentId[c.id] ?? 0,
+        id: c.id,
+        content: c.content,
+        created_at: c.created_at,
+        parent_id: c.parent_id,
+        author_id: c.author_id,
         is_operator: c.is_operator === true,
         is_post_author: isPostAuthor,
+        ip_address: c.ip_address ?? null,
+        likes: likeCountByCommentId[c.id] ?? 0,
       };
     });
 
@@ -217,8 +221,19 @@ export async function POST(
     const postAuthorIp = (postRow as { ip_address?: string | null } | null)?.ip_address ?? null;
     const isPostAuthor = !!(postAuthorIp && data?.ip_address && String(data.ip_address) === String(postAuthorIp));
 
-    const { ip_address: _ip, ...safe } = (data ?? {}) as { ip_address?: string } & typeof data;
-    const comment = data ? { ...safe, likes: 0, is_post_author: isPostAuthor } : data;
+    const comment = data
+      ? {
+          id: data.id,
+          content: data.content,
+          created_at: data.created_at,
+          parent_id: data.parent_id,
+          author_id: data.author_id,
+          is_operator: data.is_operator === true,
+          is_post_author: isPostAuthor,
+          ip_address: data.ip_address ?? null,
+          likes: 0,
+        }
+      : data;
     return NextResponse.json({ comment });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
