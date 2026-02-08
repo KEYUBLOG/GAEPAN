@@ -1221,7 +1221,7 @@ function HomeContent() {
     setReportReason("욕설/비하");
   };
 
-  /** 판결문 공유: 로컬에서는 링크 복사만, 배포 환경에서는 Web Share API 또는 링크 복사 */
+  /** 판결문 공유: 링크 복사/공유 후 해당 판결문 링크로 이동 */
   const sharePost = async (postId: string, title: string) => {
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     const url = `${origin}/?post=${postId}`;
@@ -1232,6 +1232,7 @@ function HomeContent() {
       if (!isLocal && typeof navigator !== "undefined" && navigator.share) {
         await navigator.share({ title: shareTitle, url, text });
         setPostMenuOpenId(null);
+        window.location.href = url;
         return;
       }
       if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
@@ -1242,16 +1243,19 @@ function HomeContent() {
             : "링크가 복사되었습니다. 원하는 곳에 붙여넣어 공유하세요."
         );
         setPostMenuOpenId(null);
+        window.location.href = url;
         return;
       }
     } catch (e) {
       if ((e as Error)?.name === "AbortError") {
         setPostMenuOpenId(null);
+        window.location.href = url;
         return;
       }
     }
     window.alert(`공유 링크 (복사하여 사용): ${url}`);
     setPostMenuOpenId(null);
+    window.location.href = url;
   };
 
   const closeReportModal = () => {
