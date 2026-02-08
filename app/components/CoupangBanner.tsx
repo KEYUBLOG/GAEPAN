@@ -40,7 +40,7 @@ export function CoupangBanner({ href = DEFAULT_COUPANG_LINK }: Props) {
             </span>
             <span className="text-[12px] font-bold text-white leading-tight">
               답답한 사연 읽고 고구마 먹은 기분?
-              <span className="hidden md:inline"> </span>
+              {' '}
               <br className="md:hidden" />
               <span className="text-amber-400 font-extrabold">&apos;두쫀쿠&apos;</span>로 달달하게 보충해 보세요.
             </span>

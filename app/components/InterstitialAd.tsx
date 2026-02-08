@@ -68,14 +68,19 @@ export function InterstitialAd({
           쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.
         </p>
 
-        {/* MIDDLE: 히노끼 숲 이미지만 */}
-        <div className="w-full aspect-[4/5] bg-zinc-100 overflow-hidden">
+        {/* MIDDLE: 히노끼 숲 이미지 (클릭 시 링크 이동) */}
+        <a
+          href={linkUrl}
+          target="_blank"
+          rel="noopener noreferrer nofollow"
+          className="block w-full aspect-[4/5] bg-zinc-100 overflow-hidden"
+        >
           <img
             src={imageUrl}
             alt=""
             className="w-full h-full object-cover"
           />
-        </div>
+        </a>
 
         {/* BOTTOM: 서브 카피 */}
         <p className="px-5 pt-4 pb-2 text-[13px] text-zinc-600 leading-relaxed">
