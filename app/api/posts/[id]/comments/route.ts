@@ -50,9 +50,18 @@ export async function GET(
     }
 
     const supabase = createSupabaseServerClient();
+
+    // 게시글 작성자 IP (작성자 표시용, 클라이언트에는 노출하지 않음)
+    const { data: postRow } = await supabase
+      .from("posts")
+      .select("ip_address")
+      .eq("id", postId)
+      .maybeSingle();
+    const postAuthorIp = (postRow as { ip_address?: string | null } | null)?.ip_address ?? null;
+
     const { data, error } = await supabase
       .from("comments")
-      .select("id, content, created_at, parent_id, is_hidden, author_id, is_operator")
+      .select("id, content, created_at, parent_id, is_hidden, author_id, is_operator, ip_address")
       .eq("post_id", postId)
       .neq("is_hidden", true)
       .order("created_at", { ascending: true });
@@ -108,11 +117,20 @@ export async function GET(
       likedCommentIds = (myLikeRows ?? []).map((r: { comment_id: string }) => String(r.comment_id));
     }
 
-    const commentsWithLikes = comments.map((c) => ({
-      ...c,
-      likes: likeCountByCommentId[c.id] ?? 0,
-      is_operator: c.is_operator === true, // DB에 저장된 is_operator 플래그 사용
-    }));
+    const commentsWithLikes = comments.map((c) => {
+      const isPostAuthor = !!(
+        postAuthorIp &&
+        c.ip_address &&
+        String(c.ip_address) === String(postAuthorIp)
+      );
+      const { ip_address: _ip, ...rest } = c as { ip_address?: string } & typeof c;
+      return {
+        ...rest,
+        likes: likeCountByCommentId[c.id] ?? 0,
+        is_operator: c.is_operator === true,
+        is_post_author: isPostAuthor,
+      };
+    });
 
     return NextResponse.json({ comments: commentsWithLikes, likedCommentIds });
   } catch (e) {
@@ -191,7 +209,16 @@ export async function POST(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const comment = data ? { ...data, likes: 0 } : data;
+    const { data: postRow } = await supabase
+      .from("posts")
+      .select("ip_address")
+      .eq("id", postId)
+      .maybeSingle();
+    const postAuthorIp = (postRow as { ip_address?: string | null } | null)?.ip_address ?? null;
+    const isPostAuthor = !!(postAuthorIp && data?.ip_address && String(data.ip_address) === String(postAuthorIp));
+
+    const { ip_address: _ip, ...safe } = (data ?? {}) as { ip_address?: string } & typeof data;
+    const comment = data ? { ...safe, likes: 0, is_post_author: isPostAuthor } : data;
     return NextResponse.json({ comment });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";

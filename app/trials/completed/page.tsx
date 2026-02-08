@@ -102,6 +102,7 @@ type Comment = {
   author_id: string | null;
   likes: number;
   is_operator?: boolean;
+  is_post_author?: boolean;
 };
 
 function CompletedTrialsContent() {
@@ -338,6 +339,7 @@ function CompletedTrialsContent() {
             author_id: c.author_id ?? null,
             likes: Number(c.likes) || 0,
             is_operator: c.is_operator === true,
+            is_post_author: c.is_post_author === true,
           })),
         );
         if (Array.isArray(data.likedCommentIds)) {
@@ -382,7 +384,7 @@ function CompletedTrialsContent() {
     let idx = 1;
     for (const c of sorted) {
       const key = c.author_id ?? "__anon__";
-      if (selectedPost.author_id && key === selectedPost.author_id) {
+      if (c.is_post_author) {
         if (!map[key]) {
           map[key] = "원고";
         }
@@ -393,7 +395,7 @@ function CompletedTrialsContent() {
       }
     }
     setJurorLabels(map);
-  }, [comments, selectedPost?.author_id]);
+  }, [comments]);
 
   useEffect(() => {
     if (!commentDeleteTargetId) return;
@@ -1711,7 +1713,7 @@ function CompletedTrialsContent() {
                                 ⚖️ 대법관
                               </span>
                             ) : null}
-                            {selectedPost.author_id && c.author_id === selectedPost.author_id ? (
+                            {c.is_post_author ? (
                               <span className="inline-flex items-center rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300">
                                 작성자
                               </span>
@@ -1842,11 +1844,23 @@ function CompletedTrialsContent() {
                               ㄴ
                             </span>
                             <div className="pl-2">
-                              {isReplyOperator ? (
-                                <span className="inline-flex items-center gap-1 mb-1 rounded-full bg-amber-500/30 px-1.5 py-0.5 text-[9px] font-black text-amber-200 border border-amber-500/50">
-                                  ⚖️ 대법관
-                                </span>
-                              ) : null}
+                              <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                                {!isReplyOperator ? (
+                                  <span className="font-bold shrink-0 whitespace-nowrap text-amber-500/80 text-[10px] sm:text-[11px]">
+                                    {jurorLabels[reply.author_id ?? "__anon__"] ?? "배심원"}
+                                  </span>
+                                ) : null}
+                                {isReplyOperator ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/30 px-1.5 py-0.5 text-[9px] font-black text-amber-200 border border-amber-500/50">
+                                    ⚖️ 대법관
+                                  </span>
+                                ) : null}
+                                {reply.is_post_author ? (
+                                  <span className="inline-flex shrink-0 items-center rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-bold text-amber-300 whitespace-nowrap">
+                                    작성자
+                                  </span>
+                                ) : null}
+                              </div>
                               <p className={`text-sm leading-relaxed whitespace-pre-wrap ${
                                 isReplyOperator ? "text-zinc-100 font-semibold" : "text-zinc-300"
                               }`}>
