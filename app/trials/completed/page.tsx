@@ -51,7 +51,7 @@ function getVotingEndWeek(createdAt: string | null): { year: number; week: numbe
   const d = new Date(endMs);
   const start = new Date(d.getFullYear(), 0, 1);
   const days = Math.floor((endMs - start.getTime()) / 86400000);
-  const week = Math.ceil((days + d.getDay() + 1) / 7);
+  const week = Math.ceil((days + start.getDay() + 1) / 7);
   return { year: d.getFullYear(), week: Math.min(week, 53) };
 }
 

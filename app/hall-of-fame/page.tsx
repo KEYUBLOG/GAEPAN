@@ -42,14 +42,14 @@ function isVotingOpen(createdAt: string | null, votingEndedAt?: string | null): 
   return Date.now() < new Date(createdAt).getTime() + TRIAL_DURATION_MS;
 }
 
-// created_at 기준 기본 투표 종료 주차
+// created_at 기준 기본 투표 종료 주차 (getWeekFromEndAt과 동일한 주차 공식 사용)
 function getVotingEndWeek(createdAt: string | null): { year: number; week: number } | null {
   if (!createdAt) return null;
   const endMs = new Date(createdAt).getTime() + TRIAL_DURATION_MS;
   const d = new Date(endMs);
   const start = new Date(d.getFullYear(), 0, 1);
   const days = Math.floor((endMs - start.getTime()) / 86400000);
-  const week = Math.ceil((days + d.getDay() + 1) / 7);
+  const week = Math.ceil((days + start.getDay() + 1) / 7);
   return { year: d.getFullYear(), week: Math.min(week, 53) };
 }
 
