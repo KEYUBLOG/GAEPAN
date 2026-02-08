@@ -892,7 +892,7 @@ function OngoingTrialsContent() {
                 tabIndex={0}
                 onClick={() => setSelectedPost(p)}
                 onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
-                className="group w-full max-w-[calc(100vw-2rem)] mx-auto rounded-[1.75rem] border border-zinc-900 bg-zinc-950 p-4 md:p-6 hover:border-amber-500/40 transition-all cursor-pointer select-none flex flex-col gap-2 overflow-x-hidden break-all"
+                className="group w-full max-w-[calc(100vw-2rem)] mx-auto rounded-[1.75rem] border border-zinc-900 bg-zinc-950 px-4 md:px-6 py-6 md:py-9 hover:border-amber-500/40 transition-all cursor-pointer select-none flex flex-col gap-2 overflow-x-hidden break-all"
               >
                 {/* 상단: 카테고리(좌) + 사건번호·메뉴(우측) */}
                 <div className="flex items-center justify-between mb-2 text-[11px] text-zinc-500">
@@ -911,7 +911,7 @@ function OngoingTrialsContent() {
                   </div>
                   <div className="flex items-center gap-0.5 shrink-0">
                     {p.case_number != null ? (
-                      <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-orange-400 whitespace-nowrap leading-none">
+                      <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-zinc-500 whitespace-nowrap leading-none">
                         사건 번호 {p.case_number}
                       </span>
                     ) : null}
@@ -1033,16 +1033,14 @@ function OngoingTrialsContent() {
                   </h4>
                   {p.content ? (
                     <p className="text-[11px] text-zinc-400 line-clamp-2 text-left break-all">
-                      {p.content}
+                      {(() => { const t = (p.content || "").trim().replace(/\s+/g, " "); return t.slice(0, 100) + (t.length > 100 ? "…" : ""); })()}
                     </p>
                   ) : null}
                 </div>
 
                 {/* 하단 정보 */}
                 <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2 mt-1">
-                  {p.plaintiff === "익명" && p.defendant === "익명" ? (
-                    <span>익명</span>
-                  ) : (
+                  {p.plaintiff === "익명" && p.defendant === "익명" ? null : (
                     <>
                       {p.plaintiff ? <span>원고 {p.plaintiff}</span> : null}
                       {p.plaintiff && p.defendant ? <span>·</span> : null}
@@ -1072,17 +1070,6 @@ function OngoingTrialsContent() {
                           <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-amber-400/90 bg-zinc-900 text-[10px] font-black text-amber-400 shadow-[0_0_6px_rgba(245,158,11,0.5)]" aria-hidden>⚡</span>
                         ) : null}
                       </div>
-                      {total > 0 ? (
-                        <p className="text-[11px] text-center text-zinc-400 mt-1">
-                          {isTie ? (
-                            <>배심원 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명이 참여했으나, 누구도 승리를 장담할 수 없는 팽팽한 대립이 이어지고 있습니다. 당신의 한 표가 정의를 결정합니다!</>
-                          ) : (
-                            <>지금까지 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명의 배심원이 참여했습니다.</>
-                          )}
-                        </p>
-                      ) : (
-                        <p className="text-[11px] text-center text-zinc-500 mt-1">아직 투표가 없습니다.</p>
-                      )}
                     </div>
                   );
                 })()}

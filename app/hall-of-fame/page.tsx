@@ -812,7 +812,7 @@ function HallOfFameContent() {
                   tabIndex={0}
                   onClick={() => setSelectedPost(p)}
                   onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
-                  className="group relative w-full max-w-[calc(100vw-2rem)] mx-auto rounded-[1.75rem] p-4 md:p-6 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all border border-emerald-500/25 bg-gradient-to-br from-emerald-500/15 via-zinc-800/50 to-zinc-950/95 hover:border-emerald-400/35 hover:from-emerald-400/20 hover:via-zinc-700/60 hover:to-zinc-900/95 shadow-[0_0_0_1px_rgba(52,211,153,0.08)_inset,0_4px_24px_rgba(0,0,0,0.4),0_0_40px_rgba(52,211,153,0.08)] hover:shadow-[0_0_0_1px_rgba(52,211,153,0.12)_inset,0_8px_32px_rgba(0,0,0,0.45),0_0_50px_rgba(52,211,153,0.1)]"
+                  className="group relative w-full max-w-[calc(100vw-2rem)] mx-auto rounded-[1.75rem] px-4 md:px-6 py-6 md:py-9 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all border border-emerald-500/25 bg-gradient-to-br from-emerald-500/15 via-zinc-800/50 to-zinc-950/95 hover:border-emerald-400/35 hover:from-emerald-400/20 hover:via-zinc-700/60 hover:to-zinc-900/95 shadow-[0_0_0_1px_rgba(52,211,153,0.08)_inset,0_4px_24px_rgba(0,0,0,0.4),0_0_40px_rgba(52,211,153,0.08)] hover:shadow-[0_0_0_1px_rgba(52,211,153,0.12)_inset,0_8px_32px_rgba(0,0,0,0.45),0_0_50px_rgba(52,211,153,0.1)]"
                   style={{
                     backgroundImage: "repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(52,211,153,0.04) 6px, rgba(52,211,153,0.04) 12px)",
                   }}
@@ -938,16 +938,14 @@ function HallOfFameContent() {
                     </h4>
                     {p.content ? (
                       <p className="text-[11px] text-zinc-500 line-clamp-2 text-left break-all">
-                        {p.content}
+                        {(() => { const t = (p.content || "").trim().replace(/\s+/g, " "); return t.slice(0, 100) + (t.length > 100 ? "…" : ""); })()}
                       </p>
                     ) : null}
                   </div>
 
                   {/* 원고·피고 */}
                   <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2">
-                    {p.plaintiff === "익명" && p.defendant === "익명" ? (
-                      <span>익명</span>
-                    ) : (
+                    {p.plaintiff === "익명" && p.defendant === "익명" ? null : (
                       <>
                         {p.plaintiff ? <span>원고 {p.plaintiff}</span> : null}
                         {p.plaintiff && p.defendant ? <span>·</span> : null}
@@ -987,17 +985,6 @@ function HallOfFameContent() {
                       <span className="text-red-400/80">유죄 {guiltyPct}% ({p.guilty}표)</span>
                       <span className="text-blue-400/80">무죄 {notGuiltyPct}% ({p.not_guilty}표)</span>
                     </div>
-                    {total > 0 ? (
-                      <p className="text-[11px] text-center text-zinc-400 mt-1">
-                        {p.guilty === p.not_guilty ? (
-                          <>배심원 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명이 참여했으나, 누구도 승리를 장담할 수 없는 팽팽한 대립이 이어졌습니다.</>
-                        ) : (
-                          <>지금까지 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명의 배심원이 참여했습니다.</>
-                        )}
-                      </p>
-                    ) : (
-                      <p className="text-[11px] text-center text-zinc-500 mt-1">투표가 없었습니다.</p>
-                    )}
                   </div>
 
                   {/* 하단 버튼 */}

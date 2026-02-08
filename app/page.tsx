@@ -1966,23 +1966,7 @@ function HomeContent() {
               borderColor: "rgba(255, 215, 0, 0.9)",
             }}
           >
-            <div className="rounded-[1.25rem] md:rounded-[1.75rem] p-4 md:p-6 max-[480px]:p-4 flex flex-col gap-3 relative overflow-hidden min-w-0">
-              {/* LIVE — 카드 상단 가운데, 오늘의 개판과 동일 테두리·라운딩 */}
-              {trialTab === "ongoing" && isVotingOpen(filteredTopGuiltyPost.created_at, filteredTopGuiltyPost.voting_ended_at) ? (
-                <div className="flex justify-center mb-2">
-                  <span
-                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[10px] md:text-[11px] text-zinc-300 font-bold bg-zinc-950/80"
-                    style={{ borderColor: "rgba(255, 215, 0, 0.5)" }}
-                  >
-                    <span className="relative flex h-2.5 w-2.5 shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-70" style={{ animationDuration: "1.2s" }} />
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
-                    </span>
-                    <span className="text-red-400/90">LIVE</span>
-                    <span>현재 {filteredTopGuiltyPost.guilty + filteredTopGuiltyPost.not_guilty}명이 판결 중</span>
-                  </span>
-                </div>
-              ) : null}
+            <div className="rounded-[1.25rem] md:rounded-[1.75rem] px-4 md:px-6 py-6 md:py-9 max-[480px]:px-4 max-[480px]:py-6 flex flex-col gap-3 relative overflow-hidden min-w-0">
               {/* 상단: 카테고리·오늘의 개판 배지(좌) + 사건번호·메뉴(우) */}
               <div className="flex items-center justify-between mb-2 text-[11px] text-zinc-500">
                 <div className="flex items-center gap-2 shrink-0">
@@ -1998,7 +1982,7 @@ function HomeContent() {
                 </div>
                 <div className="flex items-center gap-0.5 shrink-0">
                   {filteredTopGuiltyPost.case_number != null ? (
-                    <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-orange-400 whitespace-nowrap leading-none">
+                    <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-zinc-500 whitespace-nowrap leading-none">
                       사건 번호 {filteredTopGuiltyPost.case_number}
                     </span>
                   ) : null}
@@ -2041,16 +2025,14 @@ function HomeContent() {
                 </h4>
                 {filteredTopGuiltyPost.content ? (
                   <p className="text-[11px] text-zinc-400 line-clamp-2 text-left break-all whitespace-normal min-w-0">
-                    {filteredTopGuiltyPost.content}
+                    {(() => { const t = (filteredTopGuiltyPost.content || "").trim().replace(/\s+/g, " "); return t.slice(0, 100) + (t.length > 100 ? "…" : ""); })()}
                   </p>
                 ) : null}
               </div>
 
-              {/* 하단 정보 — 진행 중 카드와 동일 */}
+              {/* 하단 정보 — 진행 중 카드와 동일 (카드에서는 익명 텍스트 미표시) */}
               <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2 mt-1 break-all whitespace-normal min-w-0">
-                {filteredTopGuiltyPost.plaintiff === "익명" && filteredTopGuiltyPost.defendant === "익명" ? (
-                  <span>익명</span>
-                ) : (
+                {filteredTopGuiltyPost.plaintiff === "익명" && filteredTopGuiltyPost.defendant === "익명" ? null : (
                   <>
                     {filteredTopGuiltyPost.plaintiff ? <span>원고 {filteredTopGuiltyPost.plaintiff}</span> : null}
                     {filteredTopGuiltyPost.plaintiff && filteredTopGuiltyPost.defendant ? <span>·</span> : null}
@@ -2084,17 +2066,6 @@ function HomeContent() {
                         <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-amber-400/90 bg-zinc-900 text-[10px] font-black text-amber-400 shadow-[0_0_6px_rgba(245,158,11,0.5)]" aria-hidden>⚡</span>
                       ) : null}
                     </div>
-                    {total > 0 ? (
-                      <p className="text-[11px] text-center text-zinc-400 mt-1">
-                        {isTie ? (
-                          <>배심원 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명이 참여했으나, 누구도 승리를 장담할 수 없는 팽팽한 대립이 이어지고 있습니다. 당신의 한 표가 정의를 결정합니다!</>
-                        ) : (
-                          <>지금까지 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명의 배심원이 참여했습니다.</>
-                        )}
-                      </p>
-                    ) : (
-                      <p className="text-[11px] text-center text-zinc-500 mt-1">아직 투표가 없습니다.</p>
-                    )}
                   </div>
                 );
               })()}
@@ -2549,7 +2520,7 @@ function HomeContent() {
                   tabIndex={0}
                   onClick={() => setSelectedPost(p)}
                   onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
-                  className="group w-full min-w-0 rounded-[1.25rem] md:rounded-[1.75rem] border border-zinc-900 bg-zinc-950 p-4 md:p-6 hover:border-amber-500/40 transition-all cursor-pointer select-none flex flex-col gap-2 overflow-x-hidden break-all"
+                  className="group w-full min-w-0 rounded-[1.25rem] md:rounded-[1.75rem] border border-zinc-900 bg-zinc-950 px-4 md:px-6 py-6 md:py-9 hover:border-amber-500/40 transition-all cursor-pointer select-none flex flex-col gap-2 overflow-x-hidden break-all"
                 >
                 {/* 상단: 카테고리·오늘의 개판(좌) + 사건번호·메뉴(우측) */}
                 <div className="flex items-center justify-between mb-2 text-[11px] text-zinc-500">
@@ -2568,7 +2539,7 @@ function HomeContent() {
                   </div>
                 <div className="flex items-center gap-0.5 shrink-0">
                     {p.case_number != null ? (
-                      <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-orange-400 whitespace-nowrap leading-none">
+                      <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-zinc-500 whitespace-nowrap leading-none">
                         사건 번호 {p.case_number}
                       </span>
                     ) : null}
@@ -2691,16 +2662,14 @@ function HomeContent() {
                   </h4>
                   {p.content ? (
                     <p className="text-[11px] text-zinc-400 line-clamp-2 text-left break-all min-w-0">
-                      {p.content}
+                      {(() => { const t = (p.content || "").trim().replace(/\s+/g, " "); return t.slice(0, 100) + (t.length > 100 ? "…" : ""); })()}
                     </p>
                   ) : null}
                 </div>
 
-                {/* 하단 정보 */}
+                {/* 하단 정보 (카드에서는 익명 텍스트 미표시) */}
                 <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2 mt-1">
-                  {p.plaintiff === "익명" && p.defendant === "익명" ? (
-                    <span>익명</span>
-                  ) : (
+                  {p.plaintiff === "익명" && p.defendant === "익명" ? null : (
                     <>
                       {p.plaintiff ? <span>원고 {p.plaintiff}</span> : null}
                       {p.plaintiff && p.defendant ? <span>·</span> : null}
@@ -2730,17 +2699,6 @@ function HomeContent() {
                           <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-amber-400/90 bg-zinc-900 text-[10px] font-black text-amber-400 shadow-[0_0_6px_rgba(245,158,11,0.5)]" aria-hidden>⚡</span>
                         ) : null}
                       </div>
-                      {total > 0 ? (
-                        <p className="text-[11px] text-center text-zinc-400 mt-1">
-                          {isTie ? (
-                            <>배심원 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명이 참여했으나, 누구도 승리를 장담할 수 없는 팽팽한 대립이 이어지고 있습니다. 당신의 한 표가 정의를 결정합니다!</>
-                          ) : (
-                            <>지금까지 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명의 배심원이 참여했습니다.</>
-                          )}
-                        </p>
-                      ) : (
-                        <p className="text-[11px] text-center text-zinc-500 mt-1">아직 투표가 없습니다.</p>
-                      )}
                     </div>
                   );
                 })()}
@@ -2845,8 +2803,8 @@ function HomeContent() {
                   onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
                   className={
                     isWinner
-                      ? "group relative w-full min-w-0 max-w-full mx-auto rounded-[1.25rem] md:rounded-[1.75rem] border border-emerald-500/25 bg-gradient-to-br from-emerald-500/15 via-zinc-800/50 to-zinc-950/95 p-4 md:p-6 hover:border-emerald-400/35 hover:from-emerald-400/20 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all shadow-[0_0_0_1px_rgba(52,211,153,0.08)_inset,0_4px_24px_rgba(0,0,0,0.4),0_0_40px_rgba(52,211,153,0.08)] hover:shadow-[0_0_0_1px_rgba(52,211,153,0.12)_inset,0_8px_32px_rgba(0,0,0,0.45),0_0_50px_rgba(52,211,153,0.1)]"
-                      : "group relative w-full min-w-0 max-w-full mx-auto rounded-[1.25rem] md:rounded-[1.75rem] border border-zinc-700/80 bg-zinc-950/60 p-4 md:p-6 hover:border-zinc-600/80 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all opacity-90 saturate-[0.85] hover:opacity-95 hover:saturate-100"
+                      ? "group relative w-full min-w-0 max-w-full mx-auto rounded-[1.25rem] md:rounded-[1.75rem] border border-emerald-500/25 bg-gradient-to-br from-emerald-500/15 via-zinc-800/50 to-zinc-950/95 px-4 md:px-6 py-6 md:py-9 hover:border-emerald-400/35 hover:from-emerald-400/20 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all shadow-[0_0_0_1px_rgba(52,211,153,0.08)_inset,0_4px_24px_rgba(0,0,0,0.4),0_0_40px_rgba(52,211,153,0.08)] hover:shadow-[0_0_0_1px_rgba(52,211,153,0.12)_inset,0_8px_32px_rgba(0,0,0,0.45),0_0_50px_rgba(52,211,153,0.1)]"
+                      : "group relative w-full min-w-0 max-w-full mx-auto rounded-[1.25rem] md:rounded-[1.75rem] border border-zinc-700/80 bg-zinc-950/60 px-4 md:px-6 py-6 md:py-9 hover:border-zinc-600/80 transition-all cursor-pointer select-none flex flex-col gap-3 overflow-x-hidden break-all opacity-90 saturate-[0.85] hover:opacity-95 hover:saturate-100"
                   }
                   style={{
                     backgroundImage: isWinner
@@ -2881,7 +2839,7 @@ function HomeContent() {
                   </div>
                   <div className="flex items-center gap-0.5 shrink-0">
                     {p.case_number != null ? (
-                      <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-zinc-400 whitespace-nowrap leading-none">
+                      <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-zinc-500 whitespace-nowrap leading-none">
                         사건 번호 {p.case_number}
                       </span>
                     ) : null}
@@ -3001,16 +2959,14 @@ function HomeContent() {
                   </h4>
                   {p.content ? (
                     <p className="text-[11px] text-zinc-500 line-clamp-2 text-left break-all">
-                      {p.content}
+                      {(() => { const t = (p.content || "").trim().replace(/\s+/g, " "); return t.slice(0, 100) + (t.length > 100 ? "…" : ""); })()}
                     </p>
                   ) : null}
                 </div>
 
-                {/* 원고·피고 (그레이스케일 톤) */}
+                {/* 원고·피고 (그레이스케일 톤, 카드에서는 익명 텍스트 미표시) */}
                 <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2">
-                  {p.plaintiff === "익명" && p.defendant === "익명" ? (
-                    <span>익명</span>
-                  ) : (
+                  {p.plaintiff === "익명" && p.defendant === "익명" ? null : (
                     <>
                       {p.plaintiff ? <span>원고 {p.plaintiff}</span> : null}
                       {p.plaintiff && p.defendant ? <span>·</span> : null}
@@ -3050,17 +3006,6 @@ function HomeContent() {
                     <span className="text-red-400/80">유죄 {guiltyPct}% ({p.guilty}표)</span>
                     <span className="text-blue-400/80">무죄 {notGuiltyPct}% ({p.not_guilty}표)</span>
                   </div>
-                  {total > 0 ? (
-                    <p className="text-[11px] text-center text-zinc-400 mt-1">
-                      {p.guilty === p.not_guilty ? (
-                        <>배심원 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명이 참여했으나, 누구도 승리를 장담할 수 없는 팽팽한 대립이 이어졌습니다.</>
-                      ) : (
-                        <>지금까지 <span className="font-semibold text-amber-300">{total.toLocaleString("ko-KR")}</span>명의 배심원이 참여했습니다.</>
-                      )}
-                    </p>
-                  ) : (
-                    <p className="text-[11px] text-center text-zinc-500 mt-1">투표가 없었습니다.</p>
-                  )}
                 </div>
 
                 {/* 하단 버튼: 판결문 전문 보기 / 나도 사연 올리기 */}
@@ -3123,14 +3068,14 @@ function HomeContent() {
                       const totalVotes = p.guilty + p.not_guilty;
                       const guiltyPct = totalVotes ? Math.round((p.guilty / totalVotes) * 100) : 50;
                       const notGuiltyPct = totalVotes ? 100 - guiltyPct : 50;
-                      const contentPreview = (typeof p.content === "string" ? p.content : "").trim().replace(/\s+/g, " ").slice(0, 160);
+                      const contentPreview = (typeof p.content === "string" ? p.content : "").trim().replace(/\s+/g, " ").slice(0, 100);
                       return (
                         <div
                           role="button"
                           tabIndex={0}
                           onClick={() => setSelectedPost(p)}
                           onKeyDown={(e) => e.key === "Enter" && setSelectedPost(p)}
-                          className="relative overflow-hidden rounded-2xl border-2 border-emerald-500/40 bg-gradient-to-br from-emerald-950/60 via-zinc-900 to-zinc-950 p-5 md:p-6 hover:border-emerald-400/50 transition-all cursor-pointer animate-hall-of-fame-glow"
+                          className="relative overflow-hidden rounded-2xl border-2 border-emerald-500/40 bg-gradient-to-br from-emerald-950/60 via-zinc-900 to-zinc-950 px-5 md:px-6 py-7 md:py-9 hover:border-emerald-400/50 transition-all cursor-pointer animate-hall-of-fame-glow"
                           style={{
                             backgroundImage: "radial-gradient(ellipse 80% 50% at 50% 0%, rgba(52,211,153,0.08) 0%, transparent 50%), repeating-linear-gradient(-45deg, transparent, transparent 8px, rgba(52,211,153,0.03) 8px, rgba(52,211,153,0.03) 16px)",
                           }}
@@ -3167,7 +3112,7 @@ function HomeContent() {
                               <div className="rounded-xl border border-zinc-600/80 bg-zinc-800/50 px-3 py-2.5 mb-4">
                                 <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed line-clamp-3 whitespace-pre-wrap break-words">
                                   {contentPreview}
-                                  {(p.content ?? "").length > 160 ? "…" : ""}
+                                  {(typeof p.content === "string" ? p.content : "").trim().replace(/\s+/g, " ").length > 100 ? "…" : ""}
                                 </p>
                               </div>
                             ) : null}
@@ -3192,19 +3137,6 @@ function HomeContent() {
                                 <span className="text-blue-400">무죄 {notGuiltyPct}% ({p.not_guilty.toLocaleString()}표)</span>
                               </div>
                             </div>
-
-                            {/* 참여 인원 — 판결문 상세와 동일 (동점 시 별도 문구) */}
-                            <p className="text-xs text-zinc-400 font-semibold">
-                              {totalVotes > 0 ? (
-                                p.guilty === p.not_guilty ? (
-                                  <>배심원 <span className="font-semibold text-amber-300">{totalVotes.toLocaleString("ko-KR")}</span>명이 참여했으나, 누구도 승리를 장담할 수 없는 팽팽한 대립이 이어졌습니다.</>
-                                ) : (
-                                  <>지금까지 <span className="font-semibold text-amber-300">{totalVotes.toLocaleString("ko-KR")}</span>명의 배심원이 참여했습니다.</>
-                                )
-                              ) : (
-                                <>투표가 없었습니다.</>
-                              )}
-                            </p>
 
                             {/* 배심원 한마디 유도 */}
                             <p className="mt-2 text-[11px] text-zinc-500">클릭하면 판결문 상세 · 배심원 한마디를 볼 수 있습니다</p>
