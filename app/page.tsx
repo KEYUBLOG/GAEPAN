@@ -6,7 +6,6 @@ import { useSearchParams } from "next/navigation";
 import { Logo } from "@/app/components/Logo";
 import { CoupangBanner } from "@/app/components/CoupangBanner";
 import { CoupangLinkBanner } from "@/app/components/CoupangLinkBanner";
-import { StoryShareCard } from "@/app/components/StoryShareCard";
 import { animate, motion } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -334,7 +333,6 @@ function HomeContent() {
   const commentDeletePasswordRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const verdictDetailRef = useRef<HTMLDivElement | null>(null);
-  const storyCardRef = useRef<HTMLDivElement | null>(null);
 
   // 사이트 전체: 우클릭·드래그·텍스트 선택(스크랩) 금지
   useEffect(() => {
@@ -3491,6 +3489,9 @@ function HomeContent() {
 
       {/* 최근 판결문 상세 모달 */}
       {selectedPost ? (
+        (() => {
+          const isModalWinner = winnerWeekByPostId.has(selectedPost.id);
+          return (
         <div
           className="fixed inset-0 z-[110] flex items-center justify-center overflow-hidden p-3 md:p-4"
           role="dialog"
@@ -3506,9 +3507,21 @@ function HomeContent() {
               setPostMenuOpenId(null);
             }}
           />
-          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-emerald-500/25 bg-gradient-to-b from-emerald-500/10 to-zinc-950 shadow-[0_0_0_1px_rgba(52,211,153,0.08)_inset,0_0_60px_rgba(0,0,0,0.6),0_0_40px_rgba(52,211,153,0.1)]">
-            <div className="sticky top-0 z-10 flex items-center justify-between gap-4 px-3 py-4 md:p-6 border-b border-emerald-500/30 bg-zinc-950/95 backdrop-blur-sm">
-              <h3 className="text-lg font-black text-emerald-200">판결문 상세</h3>
+          <div
+            className={
+              isModalWinner
+                ? "relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-emerald-500/25 bg-gradient-to-b from-emerald-500/10 to-zinc-950 shadow-[0_0_0_1px_rgba(52,211,153,0.08)_inset,0_0_60px_rgba(0,0,0,0.6),0_0_40px_rgba(52,211,153,0.1)]"
+                : "relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-zinc-800 bg-zinc-950 shadow-[0_0_60px_rgba(0,0,0,0.8)]"
+            }
+          >
+            <div
+              className={
+                isModalWinner
+                  ? "sticky top-0 z-10 flex items-center justify-between gap-4 px-3 py-4 md:p-6 border-b border-emerald-500/30 bg-zinc-950/95 backdrop-blur-sm"
+                  : "sticky top-0 z-10 flex items-center justify-between gap-4 px-3 py-4 md:p-6 border-b border-zinc-800 bg-zinc-950"
+              }
+            >
+              <h3 className={isModalWinner ? "text-lg font-black text-emerald-200" : "text-lg font-black text-amber-500"}>판결문 상세</h3>
               <div className="flex items-center gap-2">
                 {selectedPost.case_number != null ? (
                   <span className="inline-flex items-center px-3 py-1 text-[10px] font-bold text-zinc-400 whitespace-nowrap leading-none rounded-full border border-zinc-700/80 bg-zinc-900/60">
@@ -3518,7 +3531,11 @@ function HomeContent() {
                 <button
                   type="button"
                   onClick={() => setSelectedPost(null)}
-                  className="rounded-2xl border border-emerald-500/40 bg-emerald-500/15 px-4 py-2 text-sm font-bold text-emerald-200 hover:bg-emerald-500/25 transition"
+                  className={
+                    isModalWinner
+                      ? "rounded-2xl border border-emerald-500/40 bg-emerald-500/15 px-4 py-2 text-sm font-bold text-emerald-200 hover:bg-emerald-500/25 transition"
+                      : "rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-800 transition"
+                  }
                 >
                   닫기
                 </button>
@@ -3647,52 +3664,6 @@ function HomeContent() {
                             }
                           </p>
                         </div>
-                        {/* 스토리 공유용 카드 (캡처용, 화면 밖) */}
-                        <div className="fixed left-[-9999px] top-0 z-[-1] opacity-0 pointer-events-none">
-                          <StoryShareCard
-                            ref={storyCardRef}
-                            title={selectedPost.title}
-                            isAuthorVictory={isAuthorVictory}
-                            guiltyPct={guiltyPct}
-                            notGuiltyPct={notGuiltyPct}
-                            authorName={authorName}
-                            trialType={selectedPost.trial_type}
-                          />
-                        </div>
-                        {/* 스토리에 공유하기 버튼 */}
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (!storyCardRef.current) return;
-                            try {
-                              const html2canvas = (await import("html2canvas")).default;
-                              const canvas = await html2canvas(storyCardRef.current, {
-                                scale: 3,
-                                backgroundColor: "#0a0a0a",
-                                useCORS: true,
-                                logging: false,
-                              });
-                              canvas.toBlob(async (blob) => {
-                                if (!blob) return;
-                                const file = new File([blob], "gaepan-story.png", { type: "image/png" });
-                                if (typeof navigator !== "undefined" && navigator.share && navigator.canShare?.({ files: [file] })) {
-                                  await navigator.share({ files: [file], title: "개판 판결문" });
-                                } else {
-                                  const a = document.createElement("a");
-                                  a.href = URL.createObjectURL(blob);
-                                  a.download = "gaepan-story.png";
-                                  a.click();
-                                  URL.revokeObjectURL(a.href);
-                                }
-                              }, "image/png");
-                            } catch (err) {
-                              console.error("스토리 카드 캡처 실패:", err);
-                            }
-                          }}
-                          className="w-full mt-4 py-3 rounded-xl border-2 border-amber-500/50 bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 font-bold text-sm transition"
-                        >
-                          스토리에 공유하기
-                        </button>
                       </div>
                     ) : (
                       /* 진행 중일 때: 재판 남은 시간 */
@@ -4616,7 +4587,7 @@ function HomeContent() {
             </div>
           </div>
         </div>
-      ) : null}
+      ); })() ) : null}
     </div>
     </>
   );
