@@ -4263,7 +4263,7 @@ function HomeContent() {
                           <div className="mb-1 flex flex-wrap items-center gap-1.5 sm:gap-2 text-[10px] sm:text-[11px] min-w-0">
                             <span className={`font-bold shrink-0 whitespace-nowrap ${isOperator ? "text-amber-400" : "text-amber-300"}`}>
                               {jurorLabels[getCommentLabelKey(c)] ?? "배심원"}
-                              {maskCommentIp(c.ip_address) ? ` (${maskCommentIp(c.ip_address)})` : ""}
+                              {!isOperator && maskCommentIp(c.ip_address) ? ` (${maskCommentIp(c.ip_address)})` : ""}
                             </span>
                             {isOperator ? (
                               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/30 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-black text-amber-200 border border-amber-500/50 whitespace-nowrap">
@@ -4417,7 +4417,7 @@ function HomeContent() {
                                 {!isReplyOperator ? (
                                   <span className="font-bold shrink-0 whitespace-nowrap text-amber-500/80 text-[10px] sm:text-[11px]">
                                     {jurorLabels[getCommentLabelKey(reply)] ?? "배심원"}
-                                    {maskCommentIp(reply.ip_address) ? ` (${maskCommentIp(reply.ip_address)})` : ""}
+                                    {!isReplyOperator && maskCommentIp(reply.ip_address) ? ` (${maskCommentIp(reply.ip_address)})` : ""}
                                   </span>
                                 ) : null}
                                 {isReplyOperator ? (
