@@ -13,7 +13,10 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const BASE_URL = "https://gaepanai.com";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(BASE_URL),
   title: "개판 AI - 개인들의 판결소",
   icons: { icon: "/icon.png" },
   description:
@@ -49,6 +52,9 @@ export const metadata: Metadata = {
   other: {
     "google-adsense-account": "ca-pub-8420394320463132",
   },
+  alternates: {
+    canonical: "/",
+  },
 };
 
 export default function RootLayout({
@@ -56,11 +62,29 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    name: "개판 AI - 개인들의 판결소",
+    description: "당신의 억울한 사연, AI 대법관과 배심원들이 판결해드립니다. 지금 바로 소장을 접수하세요.",
+    url: BASE_URL,
+    inLanguage: "ko",
+    potentialAction: {
+      "@type": "SearchAction",
+      target: { "@type": "EntryPoint", urlTemplate: `${BASE_URL}/?post={search_term_string}` },
+      "query-input": "required name=search_term_string",
+    },
+  };
+
   return (
     <html lang="ko" className="dark">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased overflow-x-hidden`}
       >
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
         {children}
         <Analytics />
       </body>

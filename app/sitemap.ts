@@ -1,39 +1,46 @@
 import type { MetadataRoute } from "next";
-import { createSupabaseServerClient } from "@/lib/supabase";
 
 const BASE_URL = "https://gaepanai.com";
 
-export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();
 
-  const staticPages: MetadataRoute.Sitemap = [
+  return [
     {
       url: BASE_URL,
       lastModified: now,
       changeFrequency: "daily",
       priority: 1.0,
     },
+    {
+      url: `${BASE_URL}/trials/ongoing`,
+      lastModified: now,
+      changeFrequency: "daily",
+      priority: 0.9,
+    },
+    {
+      url: `${BASE_URL}/trials/completed`,
+      lastModified: now,
+      changeFrequency: "daily",
+      priority: 0.9,
+    },
+    {
+      url: `${BASE_URL}/hall-of-fame`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.8,
+    },
+    {
+      url: `${BASE_URL}/petitions`,
+      lastModified: now,
+      changeFrequency: "daily",
+      priority: 0.8,
+    },
+    {
+      url: `${BASE_URL}/petitions/new`,
+      lastModified: now,
+      changeFrequency: "monthly",
+      priority: 0.5,
+    },
   ];
-
-  let postUrls: MetadataRoute.Sitemap = [];
-  try {
-    const supabase = createSupabaseServerClient();
-    const { data: posts, error } = await supabase
-      .from("posts")
-      .select("id")
-      .neq("status", "판결불가");
-
-    if (!error && posts?.length) {
-      postUrls = posts.map((post) => ({
-        url: `${BASE_URL}/posts/${post.id}`,
-        lastModified: now,
-        changeFrequency: "daily" as const,
-        priority: 0.8,
-      }));
-    }
-  } catch (e) {
-    console.error("[sitemap] Failed to fetch posts:", e);
-  }
-
-  return [...staticPages, ...postUrls];
 }
