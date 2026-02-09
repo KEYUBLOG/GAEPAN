@@ -791,11 +791,13 @@ function HomeContent() {
         }
 
         // 댓글 초기 로드 후 투표 로그와 병합
-        supabase
-          .from("comments")
-          .select("id, post_id, ip_address, created_at")
-          .order("created_at", { ascending: false })
-          .limit(50)
+        void Promise.resolve(
+          supabase
+            .from("comments")
+            .select("id, post_id, ip_address, created_at")
+            .order("created_at", { ascending: false })
+            .limit(50)
+        )
           .then(({ data: commentData }) => {
             const commentLogs: CourtLogEntry[] = (commentData ?? []).map((c: Record<string, unknown>) => {
               const postId = String(c.post_id ?? "");
