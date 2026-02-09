@@ -40,6 +40,7 @@ export default function PetitionDetailPage({ params }: { params: Promise<{ id: s
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [deleteToast, setDeleteToast] = useState<{ message: string; isError?: boolean } | null>(null);
+  const [judgeDeleteLoading, setJudgeDeleteLoading] = useState(false);
 
   useEffect(() => {
     params.then((p) => setPetitionId(p.id));
@@ -144,6 +145,33 @@ export default function PetitionDetailPage({ params }: { params: Promise<{ id: s
     setDeletePetitionId(null);
     setDeletePassword("");
     setDeleteSubmitting(false);
+  };
+
+  const handleJudgeDeletePetition = async () => {
+    if (!petitionId?.trim() || judgeDeleteLoading) return;
+    setJudgeDeleteLoading(true);
+    try {
+      const r = await fetch(`/api/admin/petitions/${petitionId}`, { method: "DELETE" });
+      const data = (await r.json()) as { success?: boolean; error?: string };
+      if (!r.ok || !data.success) {
+        setDeleteToast({ message: data?.error ?? "청원 삭제에 실패했습니다.", isError: true });
+        setTimeout(() => setDeleteToast(null), 5000);
+        setJudgeDeleteLoading(false);
+        return;
+      }
+      setDeleteToast({ message: "청원이 삭제되었습니다." });
+      setTimeout(() => {
+        setDeleteToast(null);
+        router.push("/petitions");
+      }, 1500);
+    } catch (err) {
+      setDeleteToast({
+        message: err instanceof Error ? err.message : "청원 삭제에 실패했습니다.",
+        isError: true,
+      });
+      setTimeout(() => setDeleteToast(null), 5000);
+      setJudgeDeleteLoading(false);
+    }
   };
 
   const handleDeletePetition = async (petitionId: string, password: string) => {
@@ -332,6 +360,16 @@ export default function PetitionDetailPage({ params }: { params: Promise<{ id: s
         {/* 청원 내용 */}
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-6 mb-6 relative">
           <div className="absolute top-4 right-4 flex items-center gap-2">
+            {isOperatorLoggedIn && (
+              <button
+                type="button"
+                onClick={handleJudgeDeletePetition}
+                disabled={judgeDeleteLoading}
+                className="px-2 py-1 text-xs font-bold text-amber-400 hover:text-amber-300 transition disabled:opacity-50"
+              >
+                {judgeDeleteLoading ? "삭제 중..." : "청원 삭제 (대법관)"}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setDeletePetitionId(petition.id)}

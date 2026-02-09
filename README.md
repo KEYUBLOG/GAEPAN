@@ -40,6 +40,44 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
   한 IP당 글/댓글당 1회만 발도장 가능. Unique(`ip_address`, `target_type`, `target_id`) 권장.
 - **comment_likes** 테이블: `id`, `comment_id`, `ip_address`. 댓글 발도장용. `sql/comment_likes.sql` 참고.
 - **reports** 테이블: `id`, `target_type` ('post'|'comment'), `target_id`, `reason`, `reporter`, `created_at` 등. 신고 접수 시 저장. Supabase 대시보드에서 확인. **테이블 생성:** `sql/reports.sql` 실행.
+- **post_views** 테이블: 조회수 집계(IP당 1회). 테이블은 있는데 **`ip_address` 컬럼이 없다**는 PGRST204 오류가 나면 Supabase SQL Editor에서 아래 실행:
+  ```sql
+  ALTER TABLE public.post_views ADD COLUMN IF NOT EXISTS ip_address text;
+  UPDATE public.post_views SET ip_address = 'legacy-' || ctid::text WHERE ip_address IS NULL;
+  ALTER TABLE public.post_views ALTER COLUMN ip_address SET NOT NULL;
+  DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'post_views_post_id_ip_address_key') THEN
+      ALTER TABLE public.post_views ADD CONSTRAINT post_views_post_id_ip_address_key UNIQUE (post_id, ip_address);
+    END IF; END $$;
+  ```
+  (`ctid`는 PostgreSQL 행마다 있는 시스템 컬럼이라 테이블에 id가 없어도 동작합니다.)  
+  **테이블 자체가 없을 때**는 아래 전체 실행:
+  ```sql
+  create table if not exists public.post_views (
+    id uuid primary key default gen_random_uuid(),
+    post_id uuid not null references public.posts(id) on delete cascade,
+    ip_address text not null,
+    created_at timestamptz not null default now(),
+    unique(post_id, ip_address)
+  );
+  create index if not exists post_views_post_id_idx on public.post_views(post_id);
+  alter table public.post_views enable row level security;
+  create policy "post_views_select" on public.post_views for select using (true);
+  create policy "post_views_insert" on public.post_views for insert with check (true);
+  ```
+- **blocked_keywords** 테이블: 대법관이 등록한 차단 키워드. 해당 키워드가 포함된 글/댓글은 작성 불가, 이미 작성된 글/댓글은 표시 시 `***`로 마스킹. **테이블 생성:** Supabase SQL Editor에서 아래 실행:
+  ```sql
+  create table if not exists public.blocked_keywords (
+    id uuid primary key default gen_random_uuid(),
+    keyword text not null unique,
+    created_at timestamptz not null default now()
+  );
+  create index if not exists blocked_keywords_keyword_idx on public.blocked_keywords(keyword);
+  alter table public.blocked_keywords enable row level security;
+  create policy "blocked_keywords_select" on public.blocked_keywords for select using (true);
+  create policy "blocked_keywords_insert" on public.blocked_keywords for insert with check (true);
+  create policy "blocked_keywords_delete" on public.blocked_keywords for delete using (true);
+  ```
 
 사건 번호 컬럼 추가: `sql/posts_case_number.sql` 실행.  
 기소장·댓글 IP 컬럼 추가: `sql/ip_address_columns.sql` 실행.

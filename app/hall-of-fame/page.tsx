@@ -8,6 +8,8 @@ import { CoupangBanner } from "@/app/components/CoupangBanner";
 import { Noto_Serif_KR } from "next/font/google";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { maskCommentIp } from "@/lib/comment";
+import { useBlockedKeywords } from "@/lib/useBlockedKeywords";
+import { parseImageUrls } from "@/lib/image-urls";
 
 const notoSerif = Noto_Serif_KR({
   weight: ["400", "600", "700"],
@@ -175,10 +177,11 @@ function HallOfFameContent() {
     details: "",
     password: "",
     category: "",
-    trial_type: "" as "" | "DEFENSE" | "ACCUSATION",
+    trial_type: "ACCUSATION",
   });
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const MAX_IMAGES = 5;
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const firstFieldRef = React.useRef<HTMLInputElement | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -187,6 +190,8 @@ function HallOfFameContent() {
   const verdictDetailRef = React.useRef<HTMLDivElement | null>(null);
   const commentsSectionRef = useRef<HTMLDivElement | null>(null);
   const [commentCountsByPostId, setCommentCountsByPostId] = useState<Record<string, number>>({});
+  const [viewCountsByPostId, setViewCountsByPostId] = useState<Record<string, number>>({});
+  const { mask: maskBlocked } = useBlockedKeywords();
   const [scrollToCommentsOnOpen, setScrollToCommentsOnOpen] = useState(false);
 
   // URL ?post=id 로 진입 시 해당 판결문 모달 바로 열기
@@ -457,7 +462,10 @@ function HallOfFameContent() {
       const bT = new Date(b.created_at ?? 0).getTime();
       return commentSort === "oldest" ? aT - bT : bT - aT;
     });
-    const top = sorted.filter((c) => !c.parent_id);
+    const topRoots = sorted.filter((c) => !c.parent_id);
+    const operatorFirst = topRoots.filter((c) => c.is_operator);
+    const rest = topRoots.filter((c) => !c.is_operator);
+    const top = [...operatorFirst, ...rest];
     const byParent = new Map<string, Comment[]>();
     for (const c of sorted) {
       if (c.parent_id) {
@@ -641,6 +649,40 @@ function HallOfFameContent() {
   }, [visiblePostIdsForCommentCount.join(",")]);
 
   useEffect(() => {
+    if (visiblePostIdsForCommentCount.length === 0) {
+      setViewCountsByPostId({});
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/posts/view-counts?ids=${visiblePostIdsForCommentCount.join(",")}`)
+      .then((r) => r.json().catch(() => ({ counts: {} })))
+      .then((data: { counts?: Record<string, number> }) => {
+        if (cancelled) return;
+        setViewCountsByPostId(data.counts ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setViewCountsByPostId({});
+      });
+    return () => { cancelled = true; };
+  }, [visiblePostIdsForCommentCount.join(",")]);
+
+  useEffect(() => {
+    if (!selectedPost?.id) return;
+    fetch(`/api/posts/${selectedPost.id}/view`, { method: "POST" })
+      .then(() => {
+        const ids = new Set(visiblePostIdsForCommentCount);
+        ids.add(selectedPost.id);
+        if (ids.size === 0) return;
+        return fetch(`/api/posts/view-counts?ids=${[...ids].join(",")}`)
+          .then((r) => r.json().catch(() => ({ counts: {} })))
+          .then((data: { counts?: Record<string, number> }) => {
+            setViewCountsByPostId((prev) => ({ ...prev, ...(data.counts ?? {}) }));
+          });
+      })
+      .catch(() => {});
+  }, [selectedPost?.id]);
+
+  useEffect(() => {
     if (!selectedPost || !scrollToCommentsOnOpen) return;
     const t = setTimeout(() => {
       commentsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -654,11 +696,11 @@ function HallOfFameContent() {
     setIsAccuseOpen(false);
     setJudgeError(null);
     setCreatedPostId(null);
-    setImageFile(null);
-    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-    setImagePreviewUrl(null);
+    setImageFiles([]);
+    imagePreviewUrls.forEach((u) => URL.revokeObjectURL(u));
+    setImagePreviewUrls([]);
     setUploadError(null);
-    setForm({ title: "", details: "", password: "", category: "", trial_type: "" });
+    setForm({ title: "", details: "", password: "", category: "", trial_type: "ACCUSATION" });
   };
 
   const openAccuse = () => {
@@ -675,8 +717,7 @@ function HallOfFameContent() {
       form.title.trim().length > 0 &&
       form.details.trim().length > 0 &&
       form.password.trim().length > 0 &&
-      form.category.trim().length > 0 &&
-      (form.trial_type === "DEFENSE" || form.trial_type === "ACCUSATION");
+      form.category.trim().length > 0;
     return ok && !isReviewing;
   }, [form, isReviewing]);
 
@@ -726,18 +767,21 @@ function HallOfFameContent() {
     setJudgeError(null);
 
     try {
-      let imageUrl: string | null = null;
-      if (imageFile) {
+      const imageUrls: string[] = [];
+      if (imageFiles.length > 0) {
         setUploadError(null);
-        const fd = new FormData();
-        fd.append("file", imageFile);
-        const uploadRes = await fetch("/api/upload", { method: "POST", body: fd });
-        const uploadData = (await uploadRes.json()) as { url?: string; error?: string };
-        if (!uploadRes.ok) {
-          setUploadError(uploadData.error ?? "이미지 업로드 실패");
-          return;
+        for (let i = 0; i < imageFiles.length; i++) {
+          const fd = new FormData();
+          fd.append("file", imageFiles[i]);
+          const uploadRes = await fetch("/api/upload", { method: "POST", body: fd });
+          const uploadData = (await uploadRes.json()) as { url?: string; error?: string };
+          if (!uploadRes.ok) {
+            setUploadError(uploadData.error ?? "이미지 업로드 실패");
+            return;
+          }
+          const url = uploadData.url ?? null;
+          if (url) imageUrls.push(url);
         }
-        imageUrl = uploadData.url ?? null;
       }
 
       const r = await fetch("/api/judge", {
@@ -746,10 +790,10 @@ function HallOfFameContent() {
         body: JSON.stringify({
           title: form.title,
           details: form.details,
-          image_url: imageUrl,
+          image_urls: imageUrls.length > 0 ? imageUrls : undefined,
           password: form.password,
           category: form.category,
-          trial_type: form.trial_type,
+          trial_type: "ACCUSATION",
         }),
       });
 
@@ -972,7 +1016,7 @@ function HallOfFameContent() {
                   {/* 제목 + 내용 요약 */}
                   <div className="mb-2 pr-16">
                     <h4 className="text-base md:text-lg font-bold text-zinc-200 group-hover:text-emerald-100 transition line-clamp-1 text-left break-all">
-                      {p.title}
+                      {maskBlocked(p.title)}
                     </h4>
                     {p.content ? (
                       <p className="text-[11px] text-zinc-500 line-clamp-2 text-left break-all">
@@ -1023,15 +1067,18 @@ function HallOfFameContent() {
                       <span className="text-red-400/80">유죄 {guiltyPct}% ({p.guilty}표)</span>
                       <span className="text-blue-400/80">무죄 {notGuiltyPct}% ({p.not_guilty}표)</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); setSelectedPost(p); setScrollToCommentsOnOpen(true); }}
-                      className="mt-1.5 flex items-center justify-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-400 transition"
-                      aria-label="댓글 보기"
-                    >
-                      <span aria-hidden>💬</span>
-                      <span>{commentCountsByPostId[p.id] ?? 0}</span>
-                    </button>
+                    <div className="mt-1.5 flex items-center justify-start gap-2 text-[10px] text-zinc-500">
+                      <span className="inline-flex items-center gap-0.5" aria-label="조회수"><span aria-hidden>👁</span><span>{viewCountsByPostId[p.id] ?? 0}</span></span>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setSelectedPost(p); setScrollToCommentsOnOpen(true); }}
+                        className="flex items-center gap-0.5 hover:text-zinc-400 transition"
+                        aria-label="댓글 보기"
+                      >
+                        <span aria-hidden>💬</span>
+                        <span>{commentCountsByPostId[p.id] ?? 0}</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* 하단 버튼 */}
@@ -1137,29 +1184,37 @@ function HallOfFameContent() {
                 
                 return (
                   <>
-                    {selectedPost.image_url ? (
-                      <div>
-                        <a
-                          href={selectedPost.image_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block rounded-xl overflow-hidden border border-zinc-800 bg-zinc-900"
-                        >
-                          <img
-                            src={selectedPost.image_url}
-                            alt="첨부 증거"
-                            className="w-full h-auto max-h-[min(36vh,280px)] object-contain bg-zinc-900"
-                          />
-                        </a>
-                        <div className="text-xs font-black tracking-widest uppercase text-zinc-500 mt-2">첨부 이미지</div>
-                      </div>
-                    ) : null}
+                    {(() => {
+                      const imgUrls = parseImageUrls(selectedPost.image_url);
+                      return imgUrls.length > 0 ? (
+                        <div>
+                          <div className="flex flex-wrap gap-3">
+                            {imgUrls.map((src, i) => (
+                              <a
+                                key={i}
+                                href={src}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block rounded-xl overflow-hidden border border-zinc-800 bg-zinc-900 flex-shrink-0"
+                              >
+                                <img
+                                  src={src}
+                                  alt={`첨부 증거 ${i + 1}`}
+                                  className="w-full h-auto max-h-[min(36vh,280px)] object-contain bg-zinc-900"
+                                />
+                              </a>
+                            ))}
+                          </div>
+                          <div className="text-xs font-black tracking-widest uppercase text-zinc-500 mt-2">첨부 이미지 {imgUrls.length > 1 ? `(${imgUrls.length}장)` : ""}</div>
+                        </div>
+                      ) : null;
+                    })()}
                     <div className="flex items-start justify-between gap-4 mb-5">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
                           <span className="text-xs font-black tracking-widest uppercase text-zinc-500">사건 제목</span>
                         </div>
-                        <h4 className="text-xl md:text-2xl font-bold text-zinc-100 break-words">{selectedPost.title}</h4>
+                        <h4 className="text-xl md:text-2xl font-bold text-zinc-100 break-words">{maskBlocked(selectedPost.title)}</h4>
                       </div>
                     </div>
                     
@@ -1343,7 +1398,7 @@ function HallOfFameContent() {
                 <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 w-full overflow-x-hidden min-w-0">
                   {selectedPost.content ? (
                     <p className="text-sm sm:text-base text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
-                      {selectedPost.content}
+                      {maskBlocked(selectedPost.content)}
                     </p>
                   ) : (
                     <p className="text-xs text-zinc-500">
@@ -1862,6 +1917,19 @@ function HallOfFameContent() {
                                     <span>🐾</span>
                                     <span>{reply.likes}</span>
                                   </button>
+                                  {!isReplyOperator ? (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setCommentDeleteTargetId(reply.id);
+                                        setCommentMenuOpenId(null);
+                                      }}
+                                      className="text-[11px] text-zinc-500 hover:text-red-400 whitespace-nowrap"
+                                    >
+                                      삭제
+                                    </button>
+                                  ) : null}
                                 </div>
                                 <div className="relative">
                                   <button
@@ -2151,43 +2219,6 @@ function HallOfFameContent() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-black tracking-widest uppercase text-zinc-400 mb-2">
-                    재판 목적
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setForm((p) => ({ ...p, trial_type: "DEFENSE" }))}
-                      disabled={isReviewing}
-                      className={`rounded-xl border-2 px-4 py-4 text-sm font-bold transition ${
-                        form.trial_type === "DEFENSE"
-                          ? "border-amber-500 bg-amber-500/20 text-amber-300"
-                          : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700"
-                      } disabled:opacity-60`}
-                    >
-                      무죄 주장<br />
-                      <span className="text-xs font-normal">(항변)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setForm((p) => ({ ...p, trial_type: "ACCUSATION" }))}
-                      disabled={isReviewing}
-                      className={`rounded-xl border-2 px-4 py-4 text-sm font-bold transition ${
-                        form.trial_type === "ACCUSATION"
-                          ? "border-amber-500 bg-amber-500/20 text-amber-300"
-                          : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700"
-                      } disabled:opacity-60`}
-                    >
-                      유죄 주장<br />
-                      <span className="text-xs font-normal">(기소)</span>
-                    </button>
-                  </div>
-                  {!form.trial_type && (
-                    <p className="mt-2 text-xs text-red-400">재판 목적을 선택해주세요.</p>
-                  )}
-                </div>
-
-                <div>
                   <label className="block text-xs font-black tracking-widest uppercase text-zinc-400">
                     카테고리
                   </label>
@@ -2230,20 +2261,21 @@ function HallOfFameContent() {
 
                 <div>
                   <label className="block text-xs font-black tracking-widest uppercase text-zinc-400">
-                    증거 이미지 (선택)
+                    증거 이미지 (선택, 최대 {MAX_IMAGES}장)
                   </label>
-                  <p className="mt-1 text-xs text-zinc-500 mb-2">JPG, PNG, GIF, WebP · 최대 5MB</p>
+                  <p className="mt-1 text-xs text-zinc-500 mb-2">JPG, PNG, GIF, WebP · 각 5MB 이하</p>
                   <input
                     ref={fileInputRef}
                     type="file"
                     accept="image/jpeg,image/png,image/gif,image/webp"
+                    multiple
                     disabled={isReviewing}
                     onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-                      setImagePreviewUrl(null);
-                      setImageFile(f ?? null);
-                      if (f) setImagePreviewUrl(URL.createObjectURL(f));
+                      const list = Array.from(e.target.files ?? []);
+                      const next = list.slice(0, MAX_IMAGES);
+                      imagePreviewUrls.forEach((u) => URL.revokeObjectURL(u));
+                      setImageFiles(next);
+                      setImagePreviewUrls(next.map((f) => URL.createObjectURL(f)));
                       setUploadError(null);
                     }}
                     className="hidden"
@@ -2251,30 +2283,36 @@ function HallOfFameContent() {
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={isReviewing}
+                    disabled={isReviewing || imageFiles.length >= MAX_IMAGES}
                     className="mt-2 w-full rounded-2xl border border-zinc-800 bg-amber-500 px-4 py-3 text-black font-bold cursor-pointer hover:bg-amber-400 transition disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    파일 선택
+                    {imageFiles.length >= MAX_IMAGES ? `최대 ${MAX_IMAGES}장까지` : "파일 선택 (여러 장 가능)"}
                   </button>
-                  {imagePreviewUrl ? (
-                    <div className="mt-3 flex items-start gap-3">
-                      <img
-                        src={imagePreviewUrl}
-                        alt="미리보기"
-                        className="h-24 w-24 rounded-xl object-cover border border-zinc-800"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setImageFile(null);
-                          if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-                          setImagePreviewUrl(null);
-                        }}
-                        disabled={isReviewing}
-                        className="rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-bold text-zinc-300 hover:bg-zinc-700 transition"
-                      >
-                        제거
-                      </button>
+                  {imagePreviewUrls.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      {imagePreviewUrls.map((url, i) => (
+                        <div key={url} className="relative">
+                          <img
+                            src={url}
+                            alt={`미리보기 ${i + 1}`}
+                            className="h-24 w-24 rounded-xl object-cover border border-zinc-800"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextFiles = imageFiles.filter((_, j) => j !== i);
+                              const nextUrls = imagePreviewUrls.filter((_, j) => j !== i);
+                              URL.revokeObjectURL(url);
+                              setImageFiles(nextFiles);
+                              setImagePreviewUrls(nextUrls);
+                            }}
+                            disabled={isReviewing}
+                            className="absolute -top-1 -right-1 rounded-full bg-zinc-800 border border-zinc-700 w-6 h-6 text-xs font-bold text-zinc-300 hover:bg-red-600 hover:border-red-500 hover:text-white transition"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   ) : null}
                   {uploadError ? (

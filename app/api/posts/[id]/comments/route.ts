@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { createSupabaseServerClient } from "@/lib/supabase";
+import { containsBlockedKeyword, maskBlockedKeywords } from "@/lib/blocked-keywords";
 import { cookies } from "next/headers";
 
 export const runtime = "nodejs";
@@ -117,15 +118,20 @@ export async function GET(
       likedCommentIds = (myLikeRows ?? []).map((r: { comment_id: string }) => String(r.comment_id));
     }
 
+    const { data: keywordRows } = await supabase.from("blocked_keywords").select("keyword");
+    const blockedKeywords = ((keywordRows ?? []) as { keyword: string }[]).map((r) => r.keyword).filter(Boolean);
+
     const commentsWithLikes = comments.map((c) => {
       const isPostAuthor = !!(
         postAuthorIp &&
         c.ip_address &&
         String(c.ip_address) === String(postAuthorIp)
       );
+      const rawContent = c.content ?? "";
+      const content = blockedKeywords.length > 0 ? maskBlockedKeywords(rawContent, blockedKeywords) : rawContent;
       return {
         id: c.id,
-        content: c.content,
+        content,
         created_at: c.created_at,
         parent_id: c.parent_id,
         author_id: c.author_id,
@@ -178,6 +184,15 @@ export async function POST(
       return NextResponse.json(
         { error: "차단된 사용자입니다. 댓글을 작성할 수 없습니다." },
         { status: 403 },
+      );
+    }
+    const supabaseForKeywords = createSupabaseServerClient();
+    const { data: keywordRows } = await supabaseForKeywords.from("blocked_keywords").select("keyword");
+    const blockedKeywords = ((keywordRows ?? []) as { keyword: string }[]).map((r) => r.keyword).filter(Boolean);
+    if (blockedKeywords.length > 0 && containsBlockedKeyword(content, blockedKeywords)) {
+      return NextResponse.json(
+        { error: "차단된 키워드가 포함되어 있습니다. 내용을 수정해 주세요." },
+        { status: 400 },
       );
     }
     const passwordHash = hashPassword(rawPassword);

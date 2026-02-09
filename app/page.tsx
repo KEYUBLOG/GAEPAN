@@ -9,6 +9,8 @@ import { CoupangLinkBanner } from "@/app/components/CoupangLinkBanner";
 import { animate, motion } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { maskCommentIp } from "@/lib/comment";
+import { useBlockedKeywords } from "@/lib/useBlockedKeywords";
+import { parseImageUrls } from "@/lib/image-urls";
 
 const TRIAL_DURATION_MS = 24 * 60 * 60 * 1000;
 const URGENT_THRESHOLD_MS = 3 * 60 * 60 * 1000;
@@ -176,6 +178,7 @@ function HomeContent() {
     mock: boolean;
     verdict: JudgeVerdict;
     imageUrl?: string | null;
+    imageUrls?: string[];
   } | null>(null);
   const [createdPostId, setCreatedPostId] = useState<string | null>(null);
   const [judgeError, setJudgeError] = useState<string | null>(null);
@@ -185,10 +188,11 @@ function HomeContent() {
     details: "",
     password: "",
     category: "",
-    trial_type: "" as "" | "DEFENSE" | "ACCUSATION",
+    trial_type: "ACCUSATION",
   });
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const MAX_IMAGES = 5;
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   type PostPreview = {
@@ -299,15 +303,26 @@ function HomeContent() {
     created_at: string;
     category: string | null;
   }>>([]);
-  const [courtLogs, setCourtLogs] = useState<Array<{
+  type CourtLogVote = {
+    kind: "vote";
     id: string;
     post_id: string;
     post_title: string | null;
     vote_type: "guilty" | "not_guilty";
-    voter_id: string; // IP 주소 기반 고유 ID
+    voter_id: string;
     nickname: string;
     created_at: string;
-  }>>([]);
+  };
+  type CourtLogComment = {
+    kind: "comment";
+    id: string;
+    post_id: string;
+    post_title: string | null;
+    nickname: string;
+    created_at: string;
+  };
+  type CourtLogEntry = CourtLogVote | CourtLogComment;
+  const [courtLogs, setCourtLogs] = useState<CourtLogEntry[]>([]);
   const courtLogsRef = useRef<HTMLDivElement | null>(null);
   const loggedVotes = useRef<Set<string>>(new Set()); // 중복 방지용: "post_id:ip_address" 형식
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
@@ -332,7 +347,9 @@ function HomeContent() {
   const verdictDetailRef = useRef<HTMLDivElement | null>(null);
   const commentsSectionRef = useRef<HTMLDivElement | null>(null);
   const [commentCountsByPostId, setCommentCountsByPostId] = useState<Record<string, number>>({});
+  const [viewCountsByPostId, setViewCountsByPostId] = useState<Record<string, number>>({});
   const [scrollToCommentsOnOpen, setScrollToCommentsOnOpen] = useState(false);
+  const { mask: maskBlocked } = useBlockedKeywords();
 
   // 사이트 전체: 우클릭·드래그·텍스트 선택(스크랩) 금지
   useEffect(() => {
@@ -522,11 +539,11 @@ function HomeContent() {
     setIsAccuseOpen(false);
     setJudgeError(null);
     setCreatedPostId(null);
-    setImageFile(null);
-    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-    setImagePreviewUrl(null);
+    setImageFiles([]);
+    imagePreviewUrls.forEach((u) => URL.revokeObjectURL(u));
+    setImagePreviewUrls([]);
     setUploadError(null);
-    setForm({ title: "", details: "", password: "", category: "", trial_type: "" });
+    setForm({ title: "", details: "", password: "", category: "", trial_type: "ACCUSATION" });
   };
 
   const openAccuse = () => {
@@ -543,8 +560,7 @@ function HomeContent() {
       form.title.trim().length > 0 &&
       form.details.trim().length > 0 &&
       form.password.trim().length > 0 &&
-      form.category.trim().length > 0 &&
-      (form.trial_type === "DEFENSE" || form.trial_type === "ACCUSATION");
+      form.category.trim().length > 0;
     return ok && !isReviewing;
   }, [form, isReviewing]);
 
@@ -748,34 +764,20 @@ function HomeContent() {
       .order("created_at", { ascending: false })
       .limit(50)
       .then(({ data }) => {
+        const voteLogs: CourtLogEntry[] = [];
+        const seen = new Set<string>();
         if (data?.length) {
-          const logs: Array<{
-            id: string;
-            post_id: string;
-            post_title: string | null;
-            vote_type: "guilty" | "not_guilty";
-            voter_id: string;
-            nickname: string;
-            created_at: string;
-          }> = [];
-          const seen = new Set<string>();
-          
-          // 최신순으로 정렬된 데이터를 역순으로 처리 (오래된 것부터)
           const reversed = [...data].reverse();
-          
           for (const item of reversed) {
             const postId = String(item.post_id ?? "");
             const voterId = String(item.ip_address ?? "");
             const key = `${postId}:${voterId}`;
-            
-            // 중복 방지: 한 유저가 동일 게시물에서 최초 1회만
             if (seen.has(key)) continue;
             seen.add(key);
-            
             const post = recentPosts.find((p) => p.id === postId);
             const nickname = generateCourtNickname(postId, voterId);
-            
-            logs.push({
+            voteLogs.push({
+              kind: "vote",
               id: String(item.id ?? ""),
               post_id: postId,
               post_title: post?.title ?? null,
@@ -784,14 +786,38 @@ function HomeContent() {
               nickname,
               created_at: String(item.created_at ?? ""),
             });
-            
             loggedVotes.current.add(key);
           }
-
-          // logs는 오래된 것 → 최신 순으로 쌓여 있으므로,
-          // 화면에는 최신 기록이 위에 오도록 역순으로 뒤집어서 저장
-          setCourtLogs(logs.reverse());
         }
+
+        // 댓글 초기 로드 후 투표 로그와 병합
+        supabase
+          .from("comments")
+          .select("id, post_id, ip_address, created_at")
+          .order("created_at", { ascending: false })
+          .limit(50)
+          .then(({ data: commentData }) => {
+            const commentLogs: CourtLogEntry[] = (commentData ?? []).map((c: Record<string, unknown>) => {
+              const postId = String(c.post_id ?? "");
+              const voterId = String(c.ip_address ?? "");
+              const post = recentPosts.find((p) => p.id === postId);
+              return {
+                kind: "comment" as const,
+                id: `comment-${c.id}`,
+                post_id: postId,
+                post_title: post?.title ?? null,
+                nickname: generateCourtNickname(postId, voterId),
+                created_at: String(c.created_at ?? ""),
+              };
+            });
+            const merged = [...voteLogs.reverse(), ...commentLogs].sort(
+              (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            );
+            setCourtLogs(merged.slice(0, 100));
+          })
+          .catch(() => {
+            setCourtLogs(voteLogs.reverse());
+          });
       });
 
     const channel = supabase
@@ -813,7 +839,8 @@ function HomeContent() {
           const nickname = generateCourtNickname(postId, voterId);
           const voteType = (row.choice === "guilty" ? "guilty" : "not_guilty") as "guilty" | "not_guilty";
           
-          const newLog = {
+          const newLog: CourtLogEntry = {
+            kind: "vote",
             id: String(row?.id ?? ""),
             post_id: postId,
             post_title: post?.title ?? null,
@@ -824,13 +851,43 @@ function HomeContent() {
           };
           
           setCourtLogs((prev) => {
-            // 최신 로그가 항상 위에 오도록 앞쪽에 추가
             const updated = [newLog, ...prev];
-            // 최대 100개까지만 유지
             return updated.slice(0, 100);
           });
 
-          // 자동 스크롤
+          setTimeout(() => {
+            courtLogsRef.current?.scrollTo({
+              top: courtLogsRef.current.scrollHeight,
+              behavior: "smooth",
+            });
+          }, 100);
+        },
+      )
+      .subscribe(() => {});
+
+    // 실시간 재판소: comments 구독 (배심원 한마디)
+    const commentsChannel = supabase
+      .channel("comments-live-court-log")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "comments" },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>;
+          const postId = String(row?.post_id ?? "");
+          const voterId = String(row?.ip_address ?? "");
+          const post = recentPosts.find((p) => p.id === postId);
+          const newLog: CourtLogEntry = {
+            kind: "comment",
+            id: `comment-${row?.id ?? ""}`,
+            post_id: postId,
+            post_title: post?.title ?? null,
+            nickname: generateCourtNickname(postId, voterId),
+            created_at: String(row?.created_at ?? ""),
+          };
+          setCourtLogs((prev) => {
+            const updated = [newLog, ...prev];
+            return updated.slice(0, 100);
+          });
           setTimeout(() => {
             courtLogsRef.current?.scrollTo({
               top: courtLogsRef.current.scrollHeight,
@@ -843,6 +900,7 @@ function HomeContent() {
     
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(commentsChannel);
     };
   }, [recentPosts]);
 
@@ -1019,34 +1077,36 @@ function HomeContent() {
       title: form.title.trim().slice(0, 50),
       detailsLength: form.details.trim().length,
       category: form.category,
-      trial_type: form.trial_type,
       submittedAt,
     });
 
     try {
-      let imageUrl: string | null = null;
-      if (imageFile) {
+      const imageUrls: string[] = [];
+      if (imageFiles.length > 0) {
         setUploadError(null);
-        const fd = new FormData();
-        fd.append("file", imageFile);
-        const uploadRes = await fetch("/api/upload", { method: "POST", body: fd });
-        let uploadData: { url?: string; error?: string } = {};
-        try {
-          const text = await uploadRes.text();
-          if (text.trim().length > 0) {
-            uploadData = JSON.parse(text) as { url?: string; error?: string };
+        for (let i = 0; i < imageFiles.length; i++) {
+          const fd = new FormData();
+          fd.append("file", imageFiles[i]);
+          const uploadRes = await fetch("/api/upload", { method: "POST", body: fd });
+          let uploadData: { url?: string; error?: string } = {};
+          try {
+            const text = await uploadRes.text();
+            if (text.trim().length > 0) {
+              uploadData = JSON.parse(text) as { url?: string; error?: string };
+            }
+          } catch {
+            uploadData = { error: uploadRes.ok ? "이미지 업로드 응답을 읽을 수 없습니다." : "이미지 업로드를 사용할 수 없습니다." };
           }
-        } catch {
-          uploadData = { error: uploadRes.ok ? "이미지 업로드 응답을 읽을 수 없습니다." : "이미지 업로드를 사용할 수 없습니다." };
-        }
-        if (!uploadRes.ok) {
-          setUploadError(uploadData.error ?? "이미지 업로드 실패");
-          return;
-        }
-        imageUrl = uploadData.url ?? null;
-        if (!imageUrl && uploadRes.ok) {
-          setUploadError("업로드된 이미지 주소를 받지 못했습니다.");
-          return;
+          if (!uploadRes.ok) {
+            setUploadError(uploadData.error ?? "이미지 업로드 실패");
+            return;
+          }
+          const url = uploadData.url ?? null;
+          if (!url && uploadRes.ok) {
+            setUploadError("업로드된 이미지 주소를 받지 못했습니다.");
+            return;
+          }
+          if (url) imageUrls.push(url);
         }
       }
 
@@ -1057,10 +1117,10 @@ function HomeContent() {
         body: JSON.stringify({
           title: form.title,
           details: form.details,
-          image_url: imageUrl,
+          image_urls: imageUrls.length > 0 ? imageUrls : undefined,
           password: form.password,
           category: form.category,
-          trial_type: form.trial_type,
+          trial_type: "ACCUSATION",
         }),
       });
 
@@ -1112,7 +1172,8 @@ function HomeContent() {
       setJudgeResult({
         mock: (data as any).mock ?? false,
         verdict: verdictPayload,
-        imageUrl: imageUrl && imageUrl.length > 0 ? imageUrl : null,
+        imageUrl: imageUrls.length > 0 ? imageUrls[0] : null,
+        imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
       });
       const pid =
         (data && "post_id" in data && (data as any).post_id) ? String((data as any).post_id) : null;
@@ -1373,7 +1434,11 @@ function HomeContent() {
       const bT = new Date(b.created_at ?? 0).getTime();
       return commentSort === "oldest" ? aT - bT : bT - aT;
     });
-    const top = sorted.filter((c) => !c.parent_id);
+    const topRoots = sorted.filter((c) => !c.parent_id);
+    // 대법관 댓글을 최상단에, 나머지는 기존 정렬 유지. 대댓글은 byParent에서 기존 순서 유지.
+    const operatorFirst = topRoots.filter((c) => c.is_operator);
+    const rest = topRoots.filter((c) => !c.is_operator);
+    const top = [...operatorFirst, ...rest];
     const byParent = new Map<string, Comment[]>();
     for (const c of sorted) {
       if (c.parent_id) {
@@ -1542,6 +1607,41 @@ function HomeContent() {
       });
     return () => { cancelled = true; };
   }, [visiblePostIdsForCommentCount.join(",")]);
+
+  useEffect(() => {
+    if (visiblePostIdsForCommentCount.length === 0) {
+      setViewCountsByPostId({});
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/posts/view-counts?ids=${visiblePostIdsForCommentCount.join(",")}`)
+      .then((r) => r.json().catch(() => ({ counts: {} })))
+      .then((data: { counts?: Record<string, number>; error?: string }) => {
+        if (cancelled) return;
+        setViewCountsByPostId(data.counts ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setViewCountsByPostId({});
+      });
+    return () => { cancelled = true; };
+  }, [visiblePostIdsForCommentCount.join(",")]);
+
+  // 게시글 상세(모달) 열릴 때 조회 기록 (IP당 1회, 기존 글 포함) 후 조회수 갱신
+  useEffect(() => {
+    if (!selectedPost?.id) return;
+    fetch(`/api/posts/${selectedPost.id}/view`, { method: "POST" })
+      .then(() => {
+        const ids = new Set(visiblePostIdsForCommentCount);
+        ids.add(selectedPost.id);
+        if (ids.size === 0) return;
+        return fetch(`/api/posts/view-counts?ids=${[...ids].join(",")}`)
+          .then((r) => r.json().catch(() => ({ counts: {} })))
+          .then((data: { counts?: Record<string, number> }) => {
+            setViewCountsByPostId((prev) => ({ ...prev, ...(data.counts ?? {}) }));
+          });
+      })
+      .catch(() => {});
+  }, [selectedPost?.id]);
 
   // 카드에서 댓글 클릭으로 모달 열었을 때 댓글 섹션으로 스크롤
   useEffect(() => {
@@ -2069,7 +2169,7 @@ function HomeContent() {
                   <span className="text-[10px] md:text-[11px] font-bold text-red-500 block mb-1 text-left">[🔥 판결 임박]</span>
                 ) : null}
                 <h4 className="text-lg md:text-2xl font-extrabold text-amber-50 group-hover:text-amber-200 transition duration-200 ease-out line-clamp-1 text-left overflow-hidden text-ellipsis break-words">
-                  {filteredTopGuiltyPost.title}
+                  {maskBlocked(filteredTopGuiltyPost.title)}
                 </h4>
                 {filteredTopGuiltyPost.content ? (
                   <p className="text-[11px] text-zinc-400 line-clamp-2 text-left break-all whitespace-normal min-w-0">
@@ -2114,15 +2214,18 @@ function HomeContent() {
                         <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-amber-400/90 bg-zinc-900 text-[10px] font-black text-amber-400 shadow-[0_0_6px_rgba(245,158,11,0.5)]" aria-hidden>⚡</span>
                       ) : null}
                     </div>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); setSelectedPost(filteredTopGuiltyPost); setScrollToCommentsOnOpen(true); }}
-                      className="mt-1.5 flex items-center justify-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-400 transition"
-                      aria-label="댓글 보기"
-                    >
-                      <span aria-hidden>💬</span>
-                      <span>{commentCountsByPostId[filteredTopGuiltyPost.id] ?? 0}</span>
-                    </button>
+                    <div className="mt-1.5 flex items-center justify-start gap-2 text-[10px] text-zinc-500">
+                      <span className="inline-flex items-center gap-0.5" aria-label="조회수"><span aria-hidden>👁</span><span>{viewCountsByPostId[filteredTopGuiltyPost.id] ?? 0}</span></span>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setSelectedPost(filteredTopGuiltyPost); setScrollToCommentsOnOpen(true); }}
+                        className="flex items-center gap-0.5 hover:text-zinc-400 transition"
+                        aria-label="댓글 보기"
+                      >
+                        <span aria-hidden>💬</span>
+                        <span>{commentCountsByPostId[filteredTopGuiltyPost.id] ?? 0}</span>
+                      </button>
+                    </div>
                   </div>
                 );
               })()}
@@ -2190,43 +2293,6 @@ function HomeContent() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-black tracking-widest uppercase text-zinc-400 mb-2">
-                    재판 목적
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setForm((p) => ({ ...p, trial_type: "DEFENSE" }))}
-                      disabled={isReviewing}
-                      className={`rounded-xl border-2 px-4 py-4 text-sm font-bold transition ${
-                        form.trial_type === "DEFENSE"
-                          ? "border-amber-500 bg-amber-500/20 text-amber-300"
-                          : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700"
-                      } disabled:opacity-60`}
-                    >
-                      무죄 주장<br />
-                      <span className="text-xs font-normal">(항변)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setForm((p) => ({ ...p, trial_type: "ACCUSATION" }))}
-                      disabled={isReviewing}
-                      className={`rounded-xl border-2 px-4 py-4 text-sm font-bold transition ${
-                        form.trial_type === "ACCUSATION"
-                          ? "border-amber-500 bg-amber-500/20 text-amber-300"
-                          : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700"
-                      } disabled:opacity-60`}
-                    >
-                      유죄 주장<br />
-                      <span className="text-xs font-normal">(기소)</span>
-                    </button>
-                  </div>
-                  {!form.trial_type && (
-                    <p className="mt-2 text-xs text-red-400">재판 목적을 선택해주세요.</p>
-                  )}
-                </div>
-
-                <div>
                   <label className="block text-xs font-black tracking-widest uppercase text-zinc-400">
                     카테고리
                   </label>
@@ -2269,20 +2335,21 @@ function HomeContent() {
 
                 <div>
                   <label className="block text-xs font-black tracking-widest uppercase text-zinc-400">
-                    증거 이미지 (선택)
+                    증거 이미지 (선택, 최대 {MAX_IMAGES}장)
                   </label>
-                  <p className="mt-1 text-xs text-zinc-500 mb-2">JPG, PNG, GIF, WebP · 최대 5MB</p>
+                  <p className="mt-1 text-xs text-zinc-500 mb-2">JPG, PNG, GIF, WebP · 각 5MB 이하</p>
                   <input
                     ref={fileInputRef}
                     type="file"
                     accept="image/jpeg,image/png,image/gif,image/webp"
+                    multiple
                     disabled={isReviewing}
                     onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-                      setImagePreviewUrl(null);
-                      setImageFile(f ?? null);
-                      if (f) setImagePreviewUrl(URL.createObjectURL(f));
+                      const list = Array.from(e.target.files ?? []);
+                      const next = list.slice(0, MAX_IMAGES);
+                      imagePreviewUrls.forEach((u) => URL.revokeObjectURL(u));
+                      setImageFiles(next);
+                      setImagePreviewUrls(next.map((f) => URL.createObjectURL(f)));
                       setUploadError(null);
                     }}
                     className="hidden"
@@ -2290,30 +2357,36 @@ function HomeContent() {
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={isReviewing}
+                    disabled={isReviewing || imageFiles.length >= MAX_IMAGES}
                     className="mt-2 w-full rounded-2xl border border-zinc-800 bg-amber-500 px-4 py-3 text-black font-bold cursor-pointer hover:bg-amber-400 transition disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    파일 선택
+                    {imageFiles.length >= MAX_IMAGES ? `최대 ${MAX_IMAGES}장까지` : "파일 선택 (여러 장 가능)"}
                   </button>
-                  {imagePreviewUrl ? (
-                    <div className="mt-3 flex items-start gap-3">
-                      <img
-                        src={imagePreviewUrl}
-                        alt="미리보기"
-                        className="h-24 w-24 rounded-xl object-cover border border-zinc-800"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setImageFile(null);
-                          if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-                          setImagePreviewUrl(null);
-                        }}
-                        disabled={isReviewing}
-                        className="rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-bold text-zinc-300 hover:bg-zinc-700 transition"
-                      >
-                        제거
-                      </button>
+                  {imagePreviewUrls.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      {imagePreviewUrls.map((url, i) => (
+                        <div key={url} className="relative">
+                          <img
+                            src={url}
+                            alt={`미리보기 ${i + 1}`}
+                            className="h-24 w-24 rounded-xl object-cover border border-zinc-800"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextFiles = imageFiles.filter((_, j) => j !== i);
+                              const nextUrls = imagePreviewUrls.filter((_, j) => j !== i);
+                              URL.revokeObjectURL(url);
+                              setImageFiles(nextFiles);
+                              setImagePreviewUrls(nextUrls);
+                            }}
+                            disabled={isReviewing}
+                            className="absolute -top-1 -right-1 rounded-full bg-zinc-800 border border-zinc-700 w-6 h-6 text-xs font-bold text-zinc-300 hover:bg-red-600 hover:border-red-500 hover:text-white transition"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   ) : null}
                   {uploadError ? (
@@ -2396,25 +2469,39 @@ function HomeContent() {
                   </div>
 
                   <div className="mt-5 grid gap-4">
-                    {(judgeResult.imageUrl || imagePreviewUrl) ? (
-                      <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-                        <div className="text-xs font-black tracking-widest uppercase text-zinc-400 mb-2">첨부 증거</div>
-                        <a
-                          href={((judgeResult.imageUrl || imagePreviewUrl) ?? "#")}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block rounded-xl overflow-hidden border border-zinc-800 bg-zinc-900"
-                        >
-                          <img
-                            src={(judgeResult.imageUrl || imagePreviewUrl) ?? ""}
-                            alt="첨부 증거"
-                            referrerPolicy="no-referrer"
-                            className="w-full h-auto max-h-[280px] object-contain bg-zinc-900"
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                          />
-                        </a>
-                      </div>
-                    ) : null}
+                    {(() => {
+                      const urls = judgeResult.imageUrls?.length
+                        ? judgeResult.imageUrls
+                        : judgeResult.imageUrl
+                          ? [judgeResult.imageUrl]
+                          : imagePreviewUrls.length > 0
+                            ? imagePreviewUrls
+                            : [];
+                      return urls.length > 0 ? (
+                        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+                          <div className="text-xs font-black tracking-widest uppercase text-zinc-400 mb-2">첨부 증거 ({urls.length}장)</div>
+                          <div className="flex flex-wrap gap-3">
+                            {urls.map((src, i) => (
+                              <a
+                                key={i}
+                                href={src.startsWith("blob:") ? undefined : src}
+                                target={src.startsWith("blob:") ? undefined : "_blank"}
+                                rel={src.startsWith("blob:") ? undefined : "noopener noreferrer"}
+                                className="block rounded-xl overflow-hidden border border-zinc-800 bg-zinc-900 flex-shrink-0"
+                              >
+                                <img
+                                  src={src}
+                                  alt={`첨부 ${i + 1}`}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-auto max-h-[280px] object-contain bg-zinc-900"
+                                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                                />
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null;
+                    })()}
                     <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
                       <div className="text-xs font-black tracking-widest uppercase text-zinc-400">
                         사건 개요
@@ -2524,6 +2611,17 @@ function HomeContent() {
               }`}
             >
               최신순
+            </button>
+            <button
+              type="button"
+              onClick={() => setOngoingSort("votes")}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${
+                ongoingSort === "votes"
+                  ? "bg-amber-500 text-black"
+                  : "bg-zinc-900 text-zinc-400 border border-zinc-800 hover:border-amber-500/50"
+              }`}
+            >
+              인기순
             </button>
             <button
               type="button"
@@ -2715,7 +2813,7 @@ function HomeContent() {
                     <span className="text-[10px] md:text-[11px] font-bold text-red-500 block mb-1 text-left">[🔥 판결 임박]</span>
                   ) : null}
                   <h4 className="text-sm md:text-lg font-bold group-hover:text-amber-400 transition line-clamp-1 text-left overflow-hidden text-ellipsis break-words">
-                    {p.title}
+                    {maskBlocked(p.title)}
                   </h4>
                   {p.content ? (
                     <p className="text-[11px] text-zinc-400 line-clamp-2 text-left break-all min-w-0">
@@ -2756,15 +2854,18 @@ function HomeContent() {
                           <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-amber-400/90 bg-zinc-900 text-[10px] font-black text-amber-400 shadow-[0_0_6px_rgba(245,158,11,0.5)]" aria-hidden>⚡</span>
                         ) : null}
                       </div>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); setSelectedPost(p); setScrollToCommentsOnOpen(true); }}
-                        className="mt-1.5 flex items-center justify-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-400 transition"
-                        aria-label="댓글 보기"
-                      >
-                        <span aria-hidden>💬</span>
-                        <span>{commentCountsByPostId[p.id] ?? 0}</span>
-                      </button>
+                      <div className="mt-1.5 flex items-center justify-start gap-2 text-[10px] text-zinc-500">
+                        <span className="inline-flex items-center gap-0.5" aria-label="조회수"><span aria-hidden>👁</span><span>{viewCountsByPostId[p.id] ?? 0}</span></span>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setSelectedPost(p); setScrollToCommentsOnOpen(true); }}
+                          className="flex items-center gap-0.5 hover:text-zinc-400 transition"
+                          aria-label="댓글 보기"
+                        >
+                          <span aria-hidden>💬</span>
+                          <span>{commentCountsByPostId[p.id] ?? 0}</span>
+                        </button>
+                      </div>
                     </div>
                   );
                 })()}
@@ -3021,7 +3122,7 @@ function HomeContent() {
                 {/* 제목 + 내용 요약 */}
                 <div className="mb-2 pr-16">
                   <h4 className={`text-base md:text-lg font-bold line-clamp-1 text-left break-all transition ${isWinner ? "text-zinc-100 group-hover:text-emerald-100" : "text-zinc-300 group-hover:text-amber-400/90"}`}>
-                    {p.title}
+                    {maskBlocked(p.title)}
                   </h4>
                   {p.content ? (
                     <p className="text-[11px] text-zinc-500 line-clamp-2 text-left break-all">
@@ -3072,15 +3173,18 @@ function HomeContent() {
                     <span className="text-red-400/80">유죄 {guiltyPct}% ({p.guilty}표)</span>
                     <span className="text-blue-400/80">무죄 {notGuiltyPct}% ({p.not_guilty}표)</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); setSelectedPost(p); setScrollToCommentsOnOpen(true); }}
-                    className="mt-1.5 flex items-center justify-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-400 transition"
-                    aria-label="댓글 보기"
-                  >
-                    <span aria-hidden>💬</span>
-                    <span>{commentCountsByPostId[p.id] ?? 0}</span>
-                  </button>
+                  <div className="mt-1.5 flex items-center justify-start gap-2 text-[10px] text-zinc-500">
+                    <span className="inline-flex items-center gap-0.5" aria-label="조회수"><span aria-hidden>👁</span><span>{viewCountsByPostId[p.id] ?? 0}</span></span>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setSelectedPost(p); setScrollToCommentsOnOpen(true); }}
+                      className="flex items-center gap-0.5 hover:text-zinc-400 transition"
+                      aria-label="댓글 보기"
+                    >
+                      <span aria-hidden>💬</span>
+                      <span>{commentCountsByPostId[p.id] ?? 0}</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* 하단 버튼: 판결문 전문 보기 / 나도 사연 올리기 */}
@@ -3179,7 +3283,7 @@ function HomeContent() {
 
                             {/* 사연 제목 */}
                             <h4 className="text-lg md:text-xl lg:text-2xl font-black text-zinc-50 leading-snug mb-3 line-clamp-2 drop-shadow-sm">
-                              {p.title || "제목 없음"}
+                              {maskBlocked(p.title) || "제목 없음"}
                             </h4>
 
                             {/* 본문 내용 일부 */}
@@ -3211,15 +3315,18 @@ function HomeContent() {
                                 <span className="text-red-400">유죄 {guiltyPct}% ({p.guilty.toLocaleString()}표)</span>
                                 <span className="text-blue-400">무죄 {notGuiltyPct}% ({p.not_guilty.toLocaleString()}표)</span>
                               </div>
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); setSelectedPost(p); setScrollToCommentsOnOpen(true); }}
-                                className="mt-1.5 flex items-center justify-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-400 transition"
-                                aria-label="댓글 보기"
-                              >
-                                <span aria-hidden>💬</span>
-                                <span>{commentCountsByPostId[p.id] ?? 0}</span>
-                              </button>
+                              <div className="mt-1.5 flex items-center justify-start gap-2 text-[10px] text-zinc-500">
+                                <span className="inline-flex items-center gap-0.5" aria-label="조회수"><span aria-hidden>👁</span><span>{viewCountsByPostId[p.id] ?? 0}</span></span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setSelectedPost(p); setScrollToCommentsOnOpen(true); }}
+                                  className="flex items-center gap-0.5 hover:text-zinc-400 transition"
+                                  aria-label="댓글 보기"
+                                >
+                                  <span aria-hidden>💬</span>
+                                  <span>{commentCountsByPostId[p.id] ?? 0}</span>
+                                </button>
+                              </div>
                             </div>
 
                             {/* 배심원 한마디 유도 */}
@@ -3289,7 +3396,8 @@ function HomeContent() {
                         second: "2-digit",
                         hour12: false, 
                       });
-                      const isGuilty = log.vote_type === "guilty";
+                      const isVote = log.kind === "vote";
+                      const isGuilty = isVote && log.vote_type === "guilty";
                       return (
                         <li 
                           key={log.id}
@@ -3307,14 +3415,16 @@ function HomeContent() {
                           {log.post_title ? (
                             <>
                               <span className="text-amber-400 font-semibold mx-1">'{log.post_title.length > 25 ? `${log.post_title.slice(0, 25)}…` : log.post_title}'</span>
-                              <span className="text-zinc-500">사건의 판결문에 날인했습니다.</span>
+                              <span className="text-zinc-500">{isVote ? "사건의 판결문에 날인했습니다." : "사건에 배심원 한마디를 남겼습니다."}</span>
                             </>
                           ) : (
-                            <span className="text-zinc-500 mx-1">사건의 판결문에 날인했습니다.</span>
+                            <span className="text-zinc-500 mx-1">{isVote ? "사건의 판결문에 날인했습니다." : "사건에 배심원 한마디를 남겼습니다."}</span>
                           )}
-                          <span className={`font-bold ml-1.5 ${isGuilty ? "text-red-600" : "text-blue-600"}`}>
-                            ({isGuilty ? "유죄" : "무죄"})
-                          </span>
+                          {isVote ? (
+                            <span className={`font-bold ml-1.5 ${isGuilty ? "text-red-600" : "text-blue-600"}`}>
+                              ({isGuilty ? "유죄" : "무죄"})
+                            </span>
+                          ) : null}
                         </li>
                       );
                     })}
@@ -3341,7 +3451,9 @@ function HomeContent() {
             <span className="text-xs font-bold text-amber-400 shrink-0">실시간 재판소</span>
             {courtLogs.length > 0 && courtLogs[0] ? (
               <span className="text-xs text-zinc-400 truncate ml-2">
-                {courtLogs[0].nickname}님이 {courtLogs[0].post_title ? `'${courtLogs[0].post_title.length > 20 ? `${courtLogs[0].post_title.slice(0, 20)}…` : courtLogs[0].post_title}'` : '사건'}에 {courtLogs[0].vote_type === "guilty" ? "유죄" : "무죄"} 판결
+                {courtLogs[0].kind === "vote"
+                  ? `${courtLogs[0].nickname}님이 ${courtLogs[0].post_title ? `'${courtLogs[0].post_title.length > 20 ? `${courtLogs[0].post_title.slice(0, 20)}…` : courtLogs[0].post_title}'` : "사건"}에 ${courtLogs[0].vote_type === "guilty" ? "유죄" : "무죄"} 판결`
+                  : `${courtLogs[0].nickname}님이 ${courtLogs[0].post_title ? `'${courtLogs[0].post_title.length > 20 ? `${courtLogs[0].post_title.slice(0, 20)}…` : courtLogs[0].post_title}'` : "사건"}에 배심원 한마디를 남겼습니다.`}
               </span>
             ) : (
               <span className="text-xs text-zinc-500 ml-2">아직 판결 기록이 없습니다.</span>
@@ -3412,7 +3524,8 @@ function HomeContent() {
                       second: "2-digit",
                       hour12: false, 
                     });
-                    const isGuilty = log.vote_type === "guilty";
+                    const isVote = log.kind === "vote";
+                    const isGuilty = isVote && log.vote_type === "guilty";
                     return (
                       <li 
                         key={log.id}
@@ -3433,14 +3546,16 @@ function HomeContent() {
                         {log.post_title ? (
                           <>
                             <span className="text-amber-400 font-semibold mx-1">'{log.post_title.length > 25 ? `${log.post_title.slice(0, 25)}…` : log.post_title}'</span>
-                            <span className="text-zinc-500">사건의 판결문에 날인했습니다.</span>
+                            <span className="text-zinc-500">{isVote ? "사건의 판결문에 날인했습니다." : "사건에 배심원 한마디를 남겼습니다."}</span>
                           </>
                         ) : (
-                          <span className="text-zinc-500 mx-1">사건의 판결문에 날인했습니다.</span>
+                          <span className="text-zinc-500 mx-1">{isVote ? "사건의 판결문에 날인했습니다." : "사건에 배심원 한마디를 남겼습니다."}</span>
                         )}
-                        <span className={`font-bold ml-1.5 ${isGuilty ? "text-red-600" : "text-blue-600"}`}>
-                          ({isGuilty ? "유죄" : "무죄"})
-                        </span>
+                        {isVote ? (
+                          <span className={`font-bold ml-1.5 ${isGuilty ? "text-red-600" : "text-blue-600"}`}>
+                            ({isGuilty ? "유죄" : "무죄"})
+                          </span>
+                        ) : null}
                       </li>
                     );
                   })}
@@ -3535,35 +3650,43 @@ function HomeContent() {
                 
                 return (
                   <>
-                    {selectedPost.image_url ? (
-                      <div>
-                        <a
-                          href={selectedPost.image_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block rounded-xl overflow-hidden border border-zinc-800 bg-zinc-900"
-                        >
-                          <img
-                            src={selectedPost.image_url}
-                            alt="첨부 증거"
-                            referrerPolicy="no-referrer"
-                            className="w-full h-auto max-h-[min(36vh,280px)] object-contain bg-zinc-900"
-                            onError={(e) => {
-                              const el = e.target as HTMLImageElement;
-                              el.style.display = "none";
-                              const wrap = el.closest("div");
-                              if (wrap) {
-                                const msg = document.createElement("p");
-                                msg.className = "text-xs text-amber-500/80 mt-2";
-                                msg.textContent = "이미지를 불러올 수 없습니다. 저장소가 공개 설정인지 확인해 주세요.";
-                                wrap.appendChild(msg);
-                              }
-                            }}
-                          />
-                        </a>
-                        <div className="text-xs font-black tracking-widest uppercase text-zinc-500 mt-2">첨부 이미지</div>
-                      </div>
-                    ) : null}
+                    {(() => {
+                      const imgUrls = parseImageUrls(selectedPost.image_url);
+                      return imgUrls.length > 0 ? (
+                        <div>
+                          <div className="flex flex-wrap gap-3">
+                            {imgUrls.map((src, i) => (
+                              <a
+                                key={i}
+                                href={src}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block rounded-xl overflow-hidden border border-zinc-800 bg-zinc-900 flex-shrink-0"
+                              >
+                                <img
+                                  src={src}
+                                  alt={`첨부 증거 ${i + 1}`}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-auto max-h-[min(36vh,280px)] object-contain bg-zinc-900"
+                                  onError={(e) => {
+                                    const el = e.target as HTMLImageElement;
+                                    el.style.display = "none";
+                                    const wrap = el.closest("div");
+                                    if (wrap) {
+                                      const msg = document.createElement("p");
+                                      msg.className = "text-xs text-amber-500/80 mt-2";
+                                      msg.textContent = "이미지를 불러올 수 없습니다. 저장소가 공개 설정인지 확인해 주세요.";
+                                      wrap.appendChild(msg);
+                                    }
+                                  }}
+                                />
+                              </a>
+                            ))}
+                          </div>
+                          <div className="text-xs font-black tracking-widest uppercase text-zinc-500 mt-2">첨부 이미지 {imgUrls.length > 1 ? `(${imgUrls.length}장)` : ""}</div>
+                        </div>
+                      ) : null;
+                    })()}
                     <div className="flex items-start justify-between gap-4 mb-5">
                         <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -3572,7 +3695,7 @@ function HomeContent() {
                           ) : null}
                           <span className="text-xs font-black tracking-widest uppercase text-zinc-500">사건 제목</span>
                         </div>
-                        <h4 className="text-lg sm:text-xl md:text-2xl font-bold text-zinc-100 break-words">{selectedPost.title}</h4>
+                        <h4 className="text-lg sm:text-xl md:text-2xl font-bold text-zinc-100 break-words">{maskBlocked(selectedPost.title)}</h4>
                       </div>
                     </div>
                     
@@ -3768,7 +3891,7 @@ function HomeContent() {
                 <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 w-full overflow-x-hidden min-w-0">
                   {selectedPost.content ? (
                     <p className="text-sm sm:text-base text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
-                      {selectedPost.content}
+                      {maskBlocked(selectedPost.content)}
                     </p>
                   ) : (
                     <p className="text-xs text-zinc-500">
@@ -3943,7 +4066,7 @@ function HomeContent() {
                                 : (userVotes[selectedPost.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
                             }`}
                           >
-                            {first === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
+                            {first === "not_guilty" ? "피고 무죄" : "피고 유죄"} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
                           </button>
                           <button
                             type="button"
@@ -3955,7 +4078,7 @@ function HomeContent() {
                                 : (userVotes[selectedPost.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
                             }`}
                           >
-                            {second === "not_guilty" ? (isDefense ? "원고 무죄" : "피고 무죄") : (isDefense ? "원고 유죄" : "피고 유죄")} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
+                            {second === "not_guilty" ? "피고 무죄" : "피고 유죄"} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
                           </button>
                         </>
                       );
@@ -4250,7 +4373,7 @@ function HomeContent() {
                     {commentTree.top.length === 0 ? (
                       <p className="mt-4 text-sm text-zinc-500">아직 배심원 한마디가 없습니다.</p>
                     ) : (
-                      <div className="mt-4 max-h-[260px] overflow-y-auto pr-1">
+                      <div className="mt-4 pr-1">
                         <ul className="space-y-4">
                     {commentTree.top.map((c) => {
                       const isOperator = c.is_operator === true;
@@ -4480,6 +4603,19 @@ function HomeContent() {
                                     <span>🐾</span>
                                     <span className="tabular-nums">{reply.likes}</span>
                                   </button>
+                                  {!isReplyOperator ? (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setCommentDeleteTargetId(reply.id);
+                                        setCommentMenuOpenId(null);
+                                      }}
+                                      className="text-[10px] sm:text-[11px] text-zinc-500 hover:text-red-400 whitespace-nowrap"
+                                    >
+                                      삭제
+                                    </button>
+                                  ) : null}
                                 </div>
                                 <div className="relative shrink-0">
                                   <button

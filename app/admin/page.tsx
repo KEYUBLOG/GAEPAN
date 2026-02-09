@@ -46,6 +46,9 @@ export default function AdminPage() {
     created_at: string;
     posts: { id: string; title: string | null; created_at: string | null }[];
   }>>([]);
+  const [blockedKeywords, setBlockedKeywords] = useState<Array<{ id: string; keyword: string; created_at: string }>>([]);
+  const [keywordInput, setKeywordInput] = useState("");
+  const [keywordLoading, setKeywordLoading] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -60,6 +63,10 @@ export default function AdminPage() {
         setChecking(false);
       });
   }, []);
+
+  useEffect(() => {
+    if (isLoggedIn) loadBlockedKeywords();
+  }, [isLoggedIn]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -170,6 +177,70 @@ export default function AdminPage() {
     }
   };
 
+  const loadBlockedKeywords = async () => {
+    setKeywordLoading(true);
+    try {
+      const r = await fetch("/api/admin/blocked-keywords");
+      const data = await safeJsonFromResponse<{ keywords?: typeof blockedKeywords; error?: string }>(r);
+      if (r.ok && data.keywords) {
+        setBlockedKeywords(data.keywords);
+      } else {
+        alert(data?.error ?? "키워드 목록을 불러오지 못했습니다.");
+      }
+    } catch (err) {
+      console.error("키워드 목록 조회 실패:", err);
+      alert("키워드 목록을 불러오는 중 오류가 발생했습니다.");
+    } finally {
+      setKeywordLoading(false);
+    }
+  };
+
+  const addBlockedKeyword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const kw = keywordInput.trim();
+    if (!kw || keywordLoading) return;
+    setKeywordLoading(true);
+    try {
+      const r = await fetch("/api/admin/blocked-keywords", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword: kw }),
+      });
+      const data = await safeJsonFromResponse<{ keyword?: { id: string; keyword: string; created_at: string }; error?: string }>(r);
+      if (r.ok && data.keyword) {
+        setBlockedKeywords((prev) => [...prev, data.keyword!].sort((a, b) => a.keyword.localeCompare(b.keyword)));
+        setKeywordInput("");
+      } else {
+        alert(data?.error ?? "키워드 추가에 실패했습니다.");
+      }
+    } catch (err) {
+      console.error("키워드 추가 실패:", err);
+      alert("키워드 추가 중 오류가 발생했습니다.");
+    } finally {
+      setKeywordLoading(false);
+    }
+  };
+
+  const removeBlockedKeyword = async (keyword: string) => {
+    if (!confirm(`"${keyword}" 차단을 해제하시겠습니까?`)) return;
+    try {
+      const r = await fetch("/api/admin/blocked-keywords", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword }),
+      });
+      const data = await safeJsonFromResponse<{ ok?: boolean; error?: string }>(r);
+      if (r.ok && data.ok) {
+        setBlockedKeywords((prev) => prev.filter((k) => k.keyword !== keyword));
+      } else {
+        alert(data?.error ?? "키워드 삭제에 실패했습니다.");
+      }
+    } catch (err) {
+      console.error("키워드 삭제 실패:", err);
+      alert("키워드 삭제 중 오류가 발생했습니다.");
+    }
+  };
+
   if (checking) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
@@ -276,6 +347,55 @@ export default function AdminPage() {
             <p className="text-xs text-zinc-500 mt-2">
               차단된 사용자의 IP와 작성한 글을 확인하고 차단을 해제할 수 있습니다.
             </p>
+            <div className="mt-6 pt-6 border-t border-zinc-800">
+              <h3 className="text-base font-bold text-zinc-200 mb-3">🔑 키워드 차단</h3>
+              <p className="text-xs text-zinc-500 mb-3">
+                등록한 키워드가 포함된 글·댓글은 작성할 수 없고, 이미 작성된 글·댓글은 표시 시 ***로 마스킹됩니다.
+              </p>
+              <form onSubmit={addBlockedKeyword} className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  value={keywordInput}
+                  onChange={(e) => setKeywordInput(e.target.value)}
+                  placeholder="차단할 키워드 입력"
+                  className="flex-1 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-amber-500/60"
+                  disabled={keywordLoading}
+                />
+                <button
+                  type="submit"
+                  disabled={!keywordInput.trim() || keywordLoading}
+                  className="rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-black hover:bg-amber-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  추가
+                </button>
+              </form>
+              <button
+                type="button"
+                onClick={loadBlockedKeywords}
+                disabled={keywordLoading}
+                className="rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2 text-xs font-bold text-zinc-300 hover:bg-zinc-700 transition disabled:opacity-50 mb-3"
+              >
+                {keywordLoading ? "불러오는 중..." : "차단 키워드 목록 새로고침"}
+              </button>
+              {blockedKeywords.length > 0 ? (
+                <ul className="space-y-2 max-h-48 overflow-y-auto">
+                  {blockedKeywords.map((k) => (
+                    <li key={k.id} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm">
+                      <span className="text-zinc-200 font-medium">{k.keyword}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeBlockedKeyword(k.keyword)}
+                        className="text-red-400 hover:text-red-300 text-xs font-bold"
+                      >
+                        삭제
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-zinc-500">등록된 차단 키워드가 없습니다. 위에서 추가 후 목록 새로고침을 누르세요.</p>
+              )}
+            </div>
           </div>
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-6 space-y-4">
             <h2 className="text-lg font-bold text-zinc-200 mb-4">개발 도구</h2>

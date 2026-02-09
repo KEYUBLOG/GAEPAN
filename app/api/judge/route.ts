@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createSupabaseServerClient } from "@/lib/supabase";
+import { containsBlockedKeyword } from "@/lib/blocked-keywords";
 import crypto from "crypto";
 
 export const runtime = "nodejs";
@@ -45,6 +46,8 @@ type JudgeRequest = {
   defendant: string;
   details: string;
   image_url?: string | null;
+  /** 여러 장 첨부 시 URL 배열 (우선 사용) */
+  image_urls?: string[] | null;
   category?: string;
   trial_type?: "DEFENSE" | "ACCUSATION";
 };
@@ -241,7 +244,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
     }
 
-    const { title, details, image_url, category: rawCategory } = body;
+    const { title, details, image_url, image_urls, category: rawCategory } = body;
     const category =
       typeof rawCategory === "string" && CATEGORIES.includes(rawCategory as any)
         ? rawCategory.trim()
@@ -253,7 +256,9 @@ export async function POST(request: Request) {
     console.log("[GAEPAN][POST /api/judge] incoming request", {
       title: title?.slice(0, 50) ?? null,
       detailsLength: typeof details === "string" ? details.length : null,
-      hasImage: typeof image_url === "string" && image_url.length > 0,
+      hasImage:
+        (Array.isArray(image_urls) && image_urls.length > 0) ||
+        (typeof image_url === "string" && image_url.length > 0),
       category: rawCategory ?? null,
       trial_type: body?.trial_type ?? null,
     });
@@ -297,20 +302,45 @@ export async function POST(request: Request) {
       );
     }
 
-    const trial_type = body.trial_type;
-    if (trial_type !== "DEFENSE" && trial_type !== "ACCUSATION") {
+    const supabaseForKeywords = createSupabaseServerClient();
+    const { data: keywordRows } = await supabaseForKeywords
+      .from("blocked_keywords")
+      .select("keyword");
+    const blockedKeywords = ((keywordRows ?? []) as { keyword: string }[])
+      .map((r) => r.keyword)
+      .filter(Boolean);
+    if (
+      blockedKeywords.length > 0 &&
+      (containsBlockedKeyword(trimmedTitle, blockedKeywords) ||
+        containsBlockedKeyword(trimmedDetails, blockedKeywords))
+    ) {
       return NextResponse.json(
-        { ok: false, error: "재판 목적을 선택해주세요." },
+        { ok: false, error: "차단된 키워드가 포함되어 있습니다. 제목 또는 내용을 수정해 주세요." },
         { status: 400 },
       );
     }
 
-    const req: JudgeRequest = {
+    // 새 글은 항상 ACCUSATION만 허용 (DEFENSE 제거)
+    const trial_type = "ACCUSATION" as const;
+
+    const urls: string[] = Array.isArray(image_urls)
+      ? image_urls.filter((u): u is string => typeof u === "string" && u.trim().length > 0)
+      : typeof image_url === "string" && image_url.trim()
+        ? [image_url.trim()]
+        : [];
+    const storedImageUrl: string | null =
+      urls.length === 0
+        ? null
+        : urls.length === 1
+          ? urls[0]
+          : JSON.stringify(urls);
+
+    const req: JudgeRequest & { image_url: string | null } = {
       title: trimmedTitle,
       plaintiff: "익명",
       defendant: "익명",
       details: trimmedDetails,
-      image_url: typeof image_url === "string" ? image_url : null,
+      image_url: storedImageUrl,
       trial_type,
     };
 
