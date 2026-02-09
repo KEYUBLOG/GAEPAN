@@ -110,6 +110,7 @@ type PostPreview = {
   category: string | null;
   trial_type: "DEFENSE" | "ACCUSATION" | null;
   voting_ended_at: string | null;
+  ip_address?: string | null;
 };
 
 type Comment = {
@@ -230,6 +231,7 @@ function HallOfFameContent() {
           category: ((row as any).category as string | null) ?? null,
           trial_type: ((row as any).trial_type === "DEFENSE" || (row as any).trial_type === "ACCUSATION") ? (row as any).trial_type : null,
           voting_ended_at: ((row as any).voting_ended_at as string | null) ?? null,
+          ip_address: ((row as any).ip_address as string | null) ?? null,
         };
         setSelectedPost(post);
         window.history.replaceState(null, "", pathname);
@@ -302,6 +304,7 @@ function HallOfFameContent() {
           category: (row.category as string | null) ?? null,
           trial_type: (row.trial_type === "DEFENSE" || row.trial_type === "ACCUSATION") ? row.trial_type : null,
           voting_ended_at: (row.voting_ended_at as string | null) ?? null,
+          ip_address: (row.ip_address as string | null) ?? null,
         });
 
         const allPosts = (data ?? [])
@@ -1273,7 +1276,7 @@ function HallOfFameContent() {
               })()}
               <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-400">
                 {selectedPost.plaintiff === "익명" && selectedPost.defendant === "익명" ? (
-                  <span>익명</span>
+                  <span>익명{maskCommentIp(selectedPost.ip_address) ? ` (${maskCommentIp(selectedPost.ip_address)})` : ""}</span>
                 ) : (
                   <>
                     {selectedPost.plaintiff ? <span>원고 {selectedPost.plaintiff}</span> : null}
