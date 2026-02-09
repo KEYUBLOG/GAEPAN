@@ -17,6 +17,11 @@ const BASE_URL = "https://gaepanai.com";
 
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),
+  viewport: {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 5,
+  },
   title: "개판 AI - 개인들의 판결소",
   icons: { icon: "/icon.png" },
   description:
