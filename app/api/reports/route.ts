@@ -20,6 +20,8 @@ function getIp(request: Request): string {
   );
 }
 
+const MAX_REASON_LENGTH = 500;
+
 // 신고 요청: 단순히 신고 내역만 저장 (Supabase 대시보드에서 확인)
 export async function POST(request: Request) {
   try {
@@ -32,11 +34,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid body" }, { status: 400 });
     }
 
+    const reason =
+      typeof body.reason === "string"
+        ? body.reason.trim().slice(0, MAX_REASON_LENGTH)
+        : null;
+
     const ip = getIp(request);
     console.log("[POST /api/reports] 신고 접수 시도:", {
       target_type: body.target_type,
       target_id: body.target_id,
-      reason: body.reason,
+      reason: reason?.slice(0, 80),
       ip,
     });
 
@@ -60,11 +67,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    // reports 테이블에 실제로 존재하는 필드만 사용
+    // reports 테이블에 실제로 존재하는 필드만 사용 (reason 길이 제한으로 과다 입력·저장 남용 방지)
     const insertPayload = {
       target_type: body.target_type,
       target_id: body.target_id,
-      reason: body.reason ?? null,
+      reason,
       ai_decision: null,
     };
 

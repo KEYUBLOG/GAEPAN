@@ -1,9 +1,18 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import crypto from "crypto";
 
 export const runtime = "nodejs";
 
 const OPERATOR_PASSWORD = process.env.OPERATOR_PASSWORD || "";
+
+/** 비밀번호 비교를 상수 시간으로 수행해 타이밍 공격 완화 */
+function constantTimeCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 export async function POST(request: Request) {
   try {
@@ -21,7 +30,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (password !== OPERATOR_PASSWORD) {
+    if (!constantTimeCompare(password, OPERATOR_PASSWORD)) {
       return NextResponse.json({ error: "비밀번호가 일치하지 않습니다." }, { status: 401 });
     }
 
