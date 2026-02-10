@@ -373,121 +373,7 @@ function HomeContent() {
   const [commentCountsByPostId, setCommentCountsByPostId] = useState<Record<string, number>>({});
   const [viewCountsByPostId, setViewCountsByPostId] = useState<Record<string, number>>({});
   const [scrollToCommentsOnOpen, setScrollToCommentsOnOpen] = useState(false);
-  const [scrollToCommentId, setScrollToCommentId] = useState<string | null>(null);
-  type NotificationItem = {
-    id: string;
-    type: string;
-    postId: string | null;
-    commentId: string | null;
-    actorDisplay: string | null;
-    payload: unknown;
-    createdAt: string;
-  };
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [notificationsLoading, setNotificationsLoading] = useState(false);
-  const [hasNewNotification, setHasNewNotification] = useState(false);
-  const notificationDropdownRef = useRef<HTMLDivElement | null>(null);
-  const lastNotificationCountRef = useRef<number>(-1);
   const { mask: maskBlocked } = useBlockedKeywords();
-
-  // 알림 목록 로드 (배지용: 지연 로드 / 드롭다운 열 때 갱신) + 새 알림 도착 시 효과용
-  const fetchNotifications = React.useCallback((options?: { markSeen?: boolean }) => {
-    return fetch("/api/notifications")
-      .then((r) => r.json().catch(() => ({ notifications: [] })))
-      .then((data: { notifications?: NotificationItem[]; error?: string }) => {
-        if (data.error) return;
-        const list = data.notifications ?? [];
-        const prev = lastNotificationCountRef.current;
-        setNotifications(list);
-        if (options?.markSeen) {
-          lastNotificationCountRef.current = list.length;
-          setHasNewNotification(false);
-        } else if (prev >= 0 && list.length > prev) {
-          setHasNewNotification(true);
-        }
-        lastNotificationCountRef.current = list.length;
-      });
-  }, []);
-  useEffect(() => {
-    if (!deferredReady) return;
-    fetchNotifications();
-  }, [deferredReady, fetchNotifications]);
-  useEffect(() => {
-    if (!notificationsOpen) return;
-    setNotificationsLoading(true);
-    fetchNotifications({ markSeen: true }).finally(() => setNotificationsLoading(false));
-  }, [notificationsOpen, fetchNotifications]);
-  // 탭 포커스 시 45초마다 알림 갱신 (새 알림 있으면 효과)
-  useEffect(() => {
-    if (!deferredReady) return;
-    const t = setInterval(() => {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        fetchNotifications();
-      }
-    }, 45000);
-    return () => clearInterval(t);
-  }, [deferredReady, fetchNotifications]);
-
-  // 알림 드롭다운 외부 클릭 시 닫기
-  useEffect(() => {
-    if (!notificationsOpen) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (notificationDropdownRef.current?.contains(e.target as Node)) return;
-      setNotificationsOpen(false);
-    };
-    document.addEventListener("click", onDocClick, true);
-    return () => document.removeEventListener("click", onDocClick, true);
-  }, [notificationsOpen]);
-
-  // 알림 클릭 시 해당 글 열고 댓글(또는 특정 댓글)로 이동
-  const openNotificationTarget = (postId: string, commentId: string | null) => {
-    setNotificationsOpen(false);
-    const found = recentPosts.find((p) => p.id === postId);
-    if (found) {
-      setSelectedPost(found);
-      if (commentId) setScrollToCommentId(commentId);
-      else setScrollToCommentsOnOpen(true);
-      return;
-    }
-    const supabase = getSupabaseBrowserClient();
-    supabase
-      .from("posts")
-      .select("*, verdict_rationale")
-      .eq("id", postId)
-      .maybeSingle()
-      .then(({ data: row, error }) => {
-        if (error || !row) return;
-        const post: PostPreview = {
-          id: String((row as any).id ?? ""),
-          title: ((row as any).title as string) ?? "",
-          plaintiff: ((row as any).plaintiff as string | null) ?? null,
-          defendant: ((row as any).defendant as string | null) ?? null,
-          content: ((row as any).content as string | null) ?? null,
-          verdict: ((row as any).verdict as string) ?? "",
-          verdict_rationale:
-            (typeof (row as any).verdict_rationale === "string"
-              ? (row as any).verdict_rationale
-              : typeof (row as any).verdictRationale === "string"
-                ? (row as any).verdictRationale
-                : "") ?? "",
-          ratio: toRatioNumber((row as any).ratio),
-          created_at: ((row as any).created_at as string | null) ?? null,
-          guilty: Number((row as any).guilty) || 0,
-          not_guilty: Number((row as any).not_guilty) || 0,
-          image_url: ((row as any).image_url as string | null) ?? null,
-          author_id: ((row as any).author_id as string | null) ?? null,
-          case_number: (row as any).case_number != null && Number.isFinite(Number((row as any).case_number)) ? Number((row as any).case_number) : null,
-          category: ((row as any).category as string | null) ?? null,
-          trial_type: ((row as any).trial_type === "DEFENSE" || (row as any).trial_type === "ACCUSATION") ? (row as any).trial_type : null,
-          voting_ended_at: ((row as any).voting_ended_at as string | null) ?? null,
-          ip_address: ((row as any).ip_address as string | null) ?? null,
-        };
-        setSelectedPost(post);
-        if (commentId) setScrollToCommentId(commentId);
-        else setScrollToCommentsOnOpen(true);
-      });
-  };
 
   // 사이트 전체: 우클릭·드래그·텍스트 선택(스크랩) 금지
   useEffect(() => {
@@ -1761,22 +1647,15 @@ function HomeContent() {
       .catch(() => {});
   }, [selectedPost?.id]);
 
-  // 카드에서 댓글 클릭 / 알림 클릭으로 모달 열었을 때 댓글(또는 특정 댓글)로 스크롤
+  // 카드에서 댓글 클릭으로 모달 열었을 때 댓글 섹션으로 스크롤
   useEffect(() => {
-    if (!selectedPost || (!scrollToCommentsOnOpen && !scrollToCommentId)) return;
-    const delay = scrollToCommentId ? 900 : 300;
+    if (!selectedPost || !scrollToCommentsOnOpen) return;
     const t = setTimeout(() => {
-      if (scrollToCommentId) {
-        const el = document.getElementById(`comment-${scrollToCommentId}`);
-        if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-        setScrollToCommentId(null);
-      } else {
-        commentsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
+      commentsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       setScrollToCommentsOnOpen(false);
-    }, delay);
+    }, 300);
     return () => clearTimeout(t);
-  }, [selectedPost?.id, scrollToCommentsOnOpen, scrollToCommentId]);
+  }, [selectedPost?.id, scrollToCommentsOnOpen]);
 
   // 삭제 비밀번호 모달 열릴 때 입력창 포커스
   useEffect(() => {
@@ -2017,81 +1896,15 @@ function HomeContent() {
       <nav className="px-4 py-3 md:py-6 md:px-16 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50">
         <Logo className="pr-2" />
 
-        <div ref={notificationDropdownRef} className="flex items-center gap-0 relative">
-          {/* 알림 버튼 (막대기 세개 버튼 좌측) — 새 알림 시 펄스 효과 */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setNotificationsOpen((o) => !o);
-              if (!notificationsOpen) setHasNewNotification(false);
-            }}
-            className={`relative text-zinc-400 hover:text-amber-500 transition p-2 rounded-lg ${hasNewNotification ? "animate-pulse" : ""}`}
-            aria-label="알림"
-            aria-expanded={notificationsOpen}
-          >
-            <span className={`inline-block text-xl transition-transform ${hasNewNotification ? "scale-110" : ""}`} title="알림">🔔</span>
-            {notifications.length > 0 ? (
-              <span className={`absolute top-0.5 right-0.5 min-w-[16px] h-4 rounded-full bg-amber-500 text-zinc-950 text-[10px] font-bold flex items-center justify-center px-1 ${hasNewNotification ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-zinc-950 animate-pulse" : ""}`}>
-                {notifications.length > 99 ? "99+" : notifications.length}
-              </span>
-            ) : null}
-          </button>
-          {notificationsOpen ? (
-            <div className="absolute top-full right-0 mt-1 w-[min(320px,90vw)] max-h-[70vh] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950 shadow-xl z-[60]">
-              <div className="p-3 border-b border-zinc-800 flex items-center justify-between sticky top-0 bg-zinc-950">
-                <span className="text-sm font-bold text-amber-500">알림</span>
-                <button type="button" onClick={() => setNotificationsOpen(false)} className="text-zinc-500 hover:text-zinc-300 text-lg leading-none" aria-label="닫기">×</button>
-              </div>
-              {notificationsLoading ? (
-                <div className="p-6 text-center text-zinc-500 text-sm">불러오는 중…</div>
-              ) : notifications.length === 0 ? (
-                <div className="p-6 text-center text-zinc-500 text-sm">알림이 없습니다.</div>
-              ) : (
-                <ul className="divide-y divide-zinc-800">
-                  {notifications.map((n) => {
-                    const label =
-                      n.type === "comment_on_post"
-                        ? `${n.actorDisplay ?? "누군가"}이(가) 내 글에 댓글을 남겼습니다.`
-                        : n.type === "reply_on_comment"
-                          ? `${n.actorDisplay ?? "누군가"}이(가) 내 댓글에 대댓글을 남겼습니다.`
-                          : n.type === "like_on_comment"
-                            ? `${n.actorDisplay ?? "누군가"}이(가) 내 댓글에 발도장을 눌렀습니다.`
-                            : n.type === "vote_on_post"
-                              ? `${n.actorDisplay ?? "누군가"}이(가) 유/무죄 투표를 했습니다.`
-                              : "새 알림";
-                    const postId = n.postId ?? "";
-                    const commentId = n.commentId ?? null;
-                    return (
-                      <li key={n.id}>
-                        <button
-                          type="button"
-                          className="w-full text-left px-4 py-3 hover:bg-zinc-800/80 transition text-sm text-zinc-200"
-                          onClick={() => postId && openNotificationTarget(postId, commentId)}
-                        >
-                          <span className="block font-medium">{label}</span>
-                          {(n.payload as { post_title?: string } | null)?.post_title ? (
-                            <span className="block text-zinc-500 truncate mt-0.5">{(n.payload as { post_title: string }).post_title}</span>
-                          ) : null}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          ) : null}
-
-          {/* 우측 상단 메뉴 버튼 (막대기 세개, 모바일/PC 공통) */}
-          <button
-            type="button"
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="text-zinc-400 hover:text-amber-500 transition p-2"
-            aria-label="메뉴"
-          >
-            <span className="text-2xl font-bold">≡</span>
-          </button>
-        </div>
+        {/* 우측 상단 메뉴 버튼 (막대기 세개, 모바일/PC 공통) */}
+        <button
+          type="button"
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          className="text-zinc-400 hover:text-amber-500 transition p-2"
+          aria-label="메뉴"
+        >
+          <span className="text-2xl font-bold">≡</span>
+        </button>
       </nav>
 
       {/* 메뉴 드로어 (모바일/PC 공통) */}

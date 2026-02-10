@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
-import { createSupabaseServerClient, createSupabaseServiceRoleClient } from "@/lib/supabase";
+import { createSupabaseServerClient } from "@/lib/supabase";
 import { containsBlockedKeyword, maskBlockedKeywords } from "@/lib/blocked-keywords";
 import { cookies } from "next/headers";
 
@@ -228,62 +228,14 @@ export async function POST(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 글 작성자 IP는 알림용으로 service role로 조회 (RLS로 가려질 수 있음)
-    const supabaseForNotif = createSupabaseServiceRoleClient() ?? supabase;
-    const { data: postRow, error: postRowError } = await supabaseForNotif
+    const { data: postRow } = await supabase
       .from("posts")
       .select("ip_address, title")
       .eq("id", postId)
       .maybeSingle();
-    if (postRowError) {
-      console.error("[GAEPAN] 알림용 posts 조회 실패:", postRowError.message, { postId });
-    }
-    const row = postRow as { ip_address?: string | null; ipAddress?: string | null; title?: string | null } | null;
-    const postAuthorIp = row?.ip_address ?? row?.ipAddress ?? null;
-    const postTitle = row?.title ?? null;
+    const postAuthorIp = (postRow as { ip_address?: string | null } | null)?.ip_address ?? null;
+    const postTitle = (postRow as { title?: string | null } | null)?.title ?? null;
     const isPostAuthor = !!(postAuthorIp && data?.ip_address && String(data.ip_address) === String(postAuthorIp));
-
-    // 알림: 본인 글이 아닐 때 글 작성자에게 댓글 알림 / 대댓글일 때 부모 댓글 작성자에게 알림
-    if (data?.id) {
-      if (!parentId) {
-        if (!postAuthorIp) {
-          console.warn("[GAEPAN] 알림 스킵: 글 작성자 IP 없음 (post_id=" + postId + "). posts.ip_address 확인.");
-        } else if (String(postAuthorIp) !== String(ip)) {
-          const { error: notifErr } = await supabaseForNotif.from("notifications").insert({
-            recipient_ip: postAuthorIp,
-            type: "comment_on_post",
-            post_id: postId,
-            comment_id: data.id,
-            actor_display: "누군가",
-            payload: { post_title: postTitle },
-          });
-          if (notifErr) {
-            console.error("[GAEPAN] notifications insert (comment_on_post) failed:", notifErr.message, { postId, recipient_ip: postAuthorIp });
-          }
-        }
-      } else {
-        const { data: parentRow } = await supabaseForNotif
-          .from("comments")
-          .select("ip_address")
-          .eq("id", parentId)
-          .maybeSingle();
-        const pr = parentRow as { ip_address?: string | null; ipAddress?: string | null } | null;
-        const parentAuthorIp = pr?.ip_address ?? pr?.ipAddress ?? null;
-        if (parentAuthorIp && String(parentAuthorIp) !== String(ip)) {
-          const { error: notifErr } = await supabaseForNotif.from("notifications").insert({
-            recipient_ip: parentAuthorIp,
-            type: "reply_on_comment",
-            post_id: postId,
-            comment_id: data.id,
-            actor_display: "누군가",
-            payload: { post_title: postTitle },
-          });
-          if (notifErr) {
-            console.error("[GAEPAN] notifications insert (reply_on_comment) failed:", notifErr.message, { postId, recipient_ip: parentAuthorIp });
-          }
-        }
-      }
-    }
 
     const comment = data
       ? {

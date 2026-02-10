@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient, createSupabaseServiceRoleClient } from "@/lib/supabase";
+import { createSupabaseServerClient } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
@@ -109,30 +109,6 @@ export async function POST(
       if (insErr) {
         console.error("[POST /api/comments/[id]/like] comment_likes insert:", insErr);
         return NextResponse.json({ error: insErr.message }, { status: 500 });
-      }
-
-      // 알림: 내 댓글이 아닐 때만 댓글 작성자에게 발도장 알림 (RLS 우회용 service role)
-      const commentAuthorIp = (commentRow as { ip_address?: string | null }).ip_address ?? null;
-      const commentPostId = (commentRow as { post_id?: string | null }).post_id ?? null;
-      if (commentAuthorIp && String(commentAuthorIp) !== String(ip) && commentPostId) {
-        const supabaseNotif = createSupabaseServiceRoleClient() ?? supabase;
-        const { data: postRow } = await supabaseNotif
-          .from("posts")
-          .select("title")
-          .eq("id", commentPostId)
-          .maybeSingle();
-        const postTitle = (postRow as { title?: string | null } | null)?.title ?? null;
-        const { error: notifErr } = await supabaseNotif.from("notifications").insert({
-          recipient_ip: commentAuthorIp,
-          type: "like_on_comment",
-          post_id: commentPostId,
-          comment_id: commentId,
-          actor_display: "누군가",
-          payload: { post_title: postTitle },
-        });
-        if (notifErr) {
-          console.error("[GAEPAN] notifications insert (like_on_comment) failed:", notifErr.message, { commentId, recipient_ip: commentAuthorIp });
-        }
       }
     }
 

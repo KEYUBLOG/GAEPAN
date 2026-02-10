@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient, createSupabaseServiceRoleClient } from "@/lib/supabase";
+import { createSupabaseServerClient } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
@@ -145,24 +145,6 @@ export async function PATCH(
 
     if (updateError) {
       return NextResponse.json({ error: updateError.message }, { status: 500 });
-    }
-
-    // 알림: 본인 글이 아닐 때만 글 작성자에게 유/무죄 투표 알림 (RLS 우회용 service role)
-    const r = row as { ip_address?: string | null; ipAddress?: string | null; title?: string | null };
-    const postAuthorIp = r.ip_address ?? r.ipAddress ?? null;
-    const postTitle = r.title ?? null;
-    if (postAuthorIp && String(postAuthorIp) !== String(ip)) {
-      const supabaseNotif = createSupabaseServiceRoleClient() ?? supabase;
-      const { error: notifErr } = await supabaseNotif.from("notifications").insert({
-        recipient_ip: postAuthorIp,
-        type: "vote_on_post",
-        post_id: postId,
-        actor_display: "익명 배심원",
-        payload: { post_title: postTitle, vote_type: type },
-      });
-      if (notifErr) {
-        console.error("[GAEPAN] notifications insert (vote_on_post) failed:", notifErr.message, { postId, recipient_ip: postAuthorIp });
-      }
     }
 
     return NextResponse.json({
