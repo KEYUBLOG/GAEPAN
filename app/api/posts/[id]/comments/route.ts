@@ -51,22 +51,23 @@ export async function GET(
     }
 
     const supabase = createSupabaseServerClient();
+    const ip = getIp(request);
 
-    // 게시글 작성자 IP (작성자 표시용, 클라이언트에는 노출하지 않음)
-    const { data: postRow } = await supabase
-      .from("posts")
-      .select("ip_address")
-      .eq("id", postId)
-      .maybeSingle();
-    const postAuthorIp = (postRow as { ip_address?: string | null } | null)?.ip_address ?? null;
+    // 1) 병렬로 posts·comments·blocked_ips·blocked_keywords 한 번에 조회
+    const [postRes, commentsRes, blockedRes, keywordRes] = await Promise.all([
+      supabase.from("posts").select("ip_address").eq("id", postId).maybeSingle(),
+      supabase
+        .from("comments")
+        .select("id, content, created_at, parent_id, is_hidden, author_id, is_operator, ip_address")
+        .eq("post_id", postId)
+        .neq("is_hidden", true)
+        .order("created_at", { ascending: true }),
+      supabase.from("blocked_ips").select("ip_address"),
+      supabase.from("blocked_keywords").select("keyword"),
+    ]);
 
-    const { data, error } = await supabase
-      .from("comments")
-      .select("id, content, created_at, parent_id, is_hidden, author_id, is_operator, ip_address")
-      .eq("post_id", postId)
-      .neq("is_hidden", true)
-      .order("created_at", { ascending: true });
-
+    const postAuthorIp = (postRes.data as { ip_address?: string | null } | null)?.ip_address ?? null;
+    const { data: commentsData, error } = commentsRes;
     if (error) {
       if (isRlsError(error)) {
         return NextResponse.json(
@@ -77,49 +78,34 @@ export async function GET(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const commentsRaw = (data ?? []) as Array<{ id: string; content?: string; created_at?: string; parent_id?: string | null; is_hidden?: boolean; author_id?: string | null; ip_address?: string | null; is_operator?: boolean }>;
-
-    // 차단된 IP 목록 조회 후 해당 IP가 작성한 댓글은 숨김 처리
-    const { data: blockedRows } = await supabase
-      .from("blocked_ips")
-      .select("ip_address");
+    const commentsRaw = (commentsData ?? []) as Array<{ id: string; content?: string; created_at?: string; parent_id?: string | null; is_hidden?: boolean; author_id?: string | null; ip_address?: string | null; is_operator?: boolean }>;
     const blockedSet = new Set(
-      (blockedRows ?? [])
+      (blockedRes.data ?? [])
         .map((r) => (r as { ip_address?: string | null }).ip_address)
-        .filter((ip): ip is string => typeof ip === "string" && ip.length > 0),
+        .filter((ipAddr): ipAddr is string => typeof ipAddr === "string" && ipAddr.length > 0),
     );
-
     const comments = commentsRaw.filter(
       (c) => !c.ip_address || !blockedSet.has(String(c.ip_address)),
     );
-
     const commentIds = comments.map((c) => c.id).filter(Boolean);
+    const blockedKeywords = ((keywordRes.data ?? []) as { keyword: string }[]).map((r) => r.keyword).filter(Boolean);
 
-    // comment_likes에서 댓글별 좋아요 수 계산 (comments.likes 컬럼 미사용)
+    // 2) 좋아요 수 / 내가 좋아요한 댓글 ID — 병렬 조회
     const likeCountByCommentId: Record<string, number> = {};
     let likedCommentIds: string[] = [];
     if (commentIds.length > 0) {
-      const ip = getIp(request);
-      const { data: likeRows } = await supabase
-        .from("comment_likes")
-        .select("comment_id")
-        .in("comment_id", commentIds);
-      const allLikeRows = likeRows ?? [];
+      const [likeRowsRes, myLikeRes] = await Promise.all([
+        supabase.from("comment_likes").select("comment_id").in("comment_id", commentIds),
+        supabase.from("comment_likes").select("comment_id").eq("ip_address", ip).in("comment_id", commentIds),
+      ]);
+      const allLikeRows = likeRowsRes.data ?? [];
       for (const id of commentIds) likeCountByCommentId[id] = 0;
       for (const r of allLikeRows) {
         const cid = String((r as { comment_id: string }).comment_id);
         likeCountByCommentId[cid] = (likeCountByCommentId[cid] ?? 0) + 1;
       }
-      const { data: myLikeRows } = await supabase
-        .from("comment_likes")
-        .select("comment_id")
-        .eq("ip_address", ip)
-        .in("comment_id", commentIds);
-      likedCommentIds = (myLikeRows ?? []).map((r: { comment_id: string }) => String(r.comment_id));
+      likedCommentIds = (myLikeRes.data ?? []).map((r: { comment_id: string }) => String(r.comment_id));
     }
-
-    const { data: keywordRows } = await supabase.from("blocked_keywords").select("keyword");
-    const blockedKeywords = ((keywordRows ?? []) as { keyword: string }[]).map((r) => r.keyword).filter(Boolean);
 
     const commentsWithLikes = comments.map((c) => {
       const isPostAuthor = !!(
