@@ -148,7 +148,7 @@ function AnimatedNumber({ value }: { value: number }) {
   return <span className="tabular-nums">{display.toLocaleString("ko-KR")}</span>;
 }
 
-/** DB ratio 값(피고 과실 0~100)을 number | null로 정규화 */
+/** DB ratio 값(피고인 과실 0~100)을 number | null로 정규화 */
 function toRatioNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     const n = Math.round(Number(value));
@@ -776,8 +776,10 @@ function HomeContent() {
             const voterId = String(item.ip_address ?? "");
             const key = `${postId}:${voterId}`;
             if (seen.has(key)) continue;
-            seen.add(key);
             const post = recentPosts.find((p) => p.id === postId);
+            // 확정된 사건만 전광판에 표시 (투표 종료된 사건)
+            if (!post || isVotingOpen(post.created_at, post.voting_ended_at)) continue;
+            seen.add(key);
             const nickname = generateCourtNickname(postId, voterId);
             voteLogs.push({
               kind: "vote",
@@ -802,19 +804,25 @@ function HomeContent() {
             .limit(50)
         )
           .then(({ data: commentData }) => {
-            const commentLogs: CourtLogEntry[] = (commentData ?? []).map((c: Record<string, unknown>) => {
-              const postId = String(c.post_id ?? "");
-              const voterId = String(c.ip_address ?? "");
-              const post = recentPosts.find((p) => p.id === postId);
-              return {
-                kind: "comment" as const,
-                id: `comment-${c.id}`,
-                post_id: postId,
-                post_title: post?.title ?? null,
-                nickname: generateCourtNickname(postId, voterId),
-                created_at: String(c.created_at ?? ""),
-              };
-            });
+            const commentLogs: CourtLogEntry[] = (commentData ?? [])
+              .filter((c: Record<string, unknown>) => {
+                const postId = String(c.post_id ?? "");
+                const post = recentPosts.find((p) => p.id === postId);
+                return post && !isVotingOpen(post.created_at, post.voting_ended_at);
+              })
+              .map((c: Record<string, unknown>) => {
+                const postId = String(c.post_id ?? "");
+                const voterId = String(c.ip_address ?? "");
+                const post = recentPosts.find((p) => p.id === postId);
+                return {
+                  kind: "comment" as const,
+                  id: `comment-${c.id}`,
+                  post_id: postId,
+                  post_title: post?.title ?? null,
+                  nickname: generateCourtNickname(postId, voterId),
+                  created_at: String(c.created_at ?? ""),
+                };
+              });
             const merged = [...voteLogs.reverse(), ...commentLogs].sort(
               (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
             );
@@ -836,11 +844,11 @@ function HomeContent() {
           const voterId = String(row?.ip_address ?? "");
           const key = `${postId}:${voterId}`;
           
-          // 중복 방지: 이미 로그에 기록된 투표는 무시
           if (loggedVotes.current.has(key)) return;
-          loggedVotes.current.add(key);
-          
           const post = recentPosts.find((p) => p.id === postId);
+          // 확정된 사건만 전광판에 표시
+          if (!post || isVotingOpen(post.created_at, post.voting_ended_at)) return;
+          loggedVotes.current.add(key);
           const nickname = generateCourtNickname(postId, voterId);
           const voteType = (row.choice === "guilty" ? "guilty" : "not_guilty") as "guilty" | "not_guilty";
           
@@ -881,6 +889,7 @@ function HomeContent() {
           const postId = String(row?.post_id ?? "");
           const voterId = String(row?.ip_address ?? "");
           const post = recentPosts.find((p) => p.id === postId);
+          if (!post || isVotingOpen(post.created_at, post.voting_ended_at)) return;
           const newLog: CourtLogEntry = {
             kind: "comment",
             id: `comment-${row?.id ?? ""}`,
@@ -995,7 +1004,7 @@ function HomeContent() {
     };
   }, [selectedPost?.id]);
 
-  // 배심원 라벨링: 글 작성순(created_at 오름차순)으로 원고 / 배심원 1, 2, ...
+  // 배심원 라벨링: 글 작성순(created_at 오름차순)으로 검사 / 배심원 1, 2, ...
   // 같은 IP면 같은 배심원 번호 유지 (해당 글에서)
   const getCommentLabelKey = (c: { id: string; author_id: string | null; is_post_author?: boolean; ip_address?: string | null }) =>
     c.author_id ?? (c.is_post_author ? "__author__" : (c.ip_address ?? `comment_${c.id}`));
@@ -1014,7 +1023,7 @@ function HomeContent() {
     for (const c of sorted) {
       const key = getCommentLabelKey(c);
       if (c.is_post_author) {
-        if (!map[key]) map[key] = "원고";
+        if (!map[key]) map[key] = "검사";
       } else {
         if (!map[key]) map[key] = `배심원 ${idx++}`;
       }
@@ -1159,7 +1168,8 @@ function HomeContent() {
       }
 
       if ("status" in data && data.status === "판결불가") {
-        setJudgeError("금지어 또는 부적절한 내용이 포함되어 판결이 불가합니다.");
+        const msg = (data as { message?: string }).message ?? "판결할 수 없습니다. 본문에서 검사와 피고인을 명확히 구분해 주세요.";
+        setJudgeError(msg);
         console.warn("[GAEPAN][Accuse] 판결불가 응답", data);
         return;
       }
@@ -2187,9 +2197,9 @@ function HomeContent() {
               <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2 mt-1 break-all whitespace-normal min-w-0">
                 {filteredTopGuiltyPost.plaintiff === "익명" && filteredTopGuiltyPost.defendant === "익명" ? null : (
                   <>
-                    {filteredTopGuiltyPost.plaintiff ? <span>원고 {filteredTopGuiltyPost.plaintiff}</span> : null}
+                    {filteredTopGuiltyPost.plaintiff ? <span>검사 {filteredTopGuiltyPost.plaintiff}</span> : null}
                     {filteredTopGuiltyPost.plaintiff && filteredTopGuiltyPost.defendant ? <span>·</span> : null}
-                    {filteredTopGuiltyPost.defendant ? <span>피고 {filteredTopGuiltyPost.defendant}</span> : null}
+                    {filteredTopGuiltyPost.defendant ? <span>피고인 {filteredTopGuiltyPost.defendant}</span> : null}
                   </>
                 )}
               </div>
@@ -2458,7 +2468,7 @@ function HomeContent() {
                         )}
                       </div>
                       <div className="mt-2 text-lg md:text-xl font-black tracking-tight">
-                        최종 판결
+                        최종 선고
                       </div>
                     </div>
                     <button
@@ -2522,7 +2532,7 @@ function HomeContent() {
                           과실 비율
                         </div>
                         <div className="text-xs font-black text-zinc-300">
-                          원고 {judgeResult.verdict.ratio.plaintiff}% / 피고{" "}
+                          검사 {judgeResult.verdict.ratio.plaintiff}% / 피고인{" "}
                           {judgeResult.verdict.ratio.defendant}%
                         </div>
                       </div>
@@ -2543,7 +2553,7 @@ function HomeContent() {
 
                     <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4">
                       <div className="text-xs font-black tracking-widest uppercase text-amber-200">
-                        최종 판결
+                        최종 선고
                       </div>
                       <div className="mt-2 text-sm md:text-base font-bold text-amber-50 leading-relaxed whitespace-pre-wrap">
                         {judgeResult.verdict.verdict}
@@ -2831,9 +2841,9 @@ function HomeContent() {
                 <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2 mt-1">
                   {p.plaintiff === "익명" && p.defendant === "익명" ? null : (
                     <>
-                      {p.plaintiff ? <span>원고 {p.plaintiff}</span> : null}
+                      {p.plaintiff ? <span>검사 {p.plaintiff}</span> : null}
                       {p.plaintiff && p.defendant ? <span>·</span> : null}
-                      {p.defendant ? <span>피고 {p.defendant}</span> : null}
+                      {p.defendant ? <span>피고인 {p.defendant}</span> : null}
                     </>
                   )}
                 </div>
@@ -2963,7 +2973,7 @@ function HomeContent() {
                 const verdictText = typeof p.verdict === "string" ? p.verdict : "";
                 const isDefense =
                   p.trial_type === "DEFENSE" ||
-                  (verdictText.includes("원고 무죄") && p.trial_type !== "ACCUSATION");
+                  ((verdictText.includes("피고인 무죄") || verdictText.includes("불기소") || verdictText.includes("원고 무죄")) && p.trial_type !== "ACCUSATION");
                 const isWinner = winnerWeekByPostId.has(p.id);
                 const weekInfo = winnerWeekByPostId.get(p.id);
                 return (
@@ -3136,13 +3146,13 @@ function HomeContent() {
                   ) : null}
                 </div>
 
-                {/* 원고·피고 (그레이스케일 톤, 카드에서는 익명 텍스트 미표시) */}
+                {/* 검사·피고인 (그레이스케일 톤, 카드에서는 익명 텍스트 미표시) */}
                 <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 mb-2">
                   {p.plaintiff === "익명" && p.defendant === "익명" ? null : (
                     <>
-                      {p.plaintiff ? <span>원고 {p.plaintiff}</span> : null}
+                      {p.plaintiff ? <span>검사 {p.plaintiff}</span> : null}
                       {p.plaintiff && p.defendant ? <span>·</span> : null}
-                      {p.defendant ? <span>피고 {p.defendant}</span> : null}
+                      {p.defendant ? <span>피고인 {p.defendant}</span> : null}
                     </>
                   )}
                 </div>
@@ -3633,25 +3643,25 @@ function HomeContent() {
                 const notGuiltyPct = total ? Math.round((selectedPost.not_guilty / total) * 100) : 0;
                 const aiRatio = selectedPost.ratio ?? 50;
                 
-                // 재판 목적에 따른 승소/패소 판정
+                // 재판 목적에 따른 승소/패소 판정 (과반수 기준, 동점 시 AI 대법관 캐스팅 보트)
+                const isTie = selectedPost.guilty === selectedPost.not_guilty;
                 let isAuthorVictory = false;
                 if (selectedPost.trial_type === "DEFENSE") {
-                  // 무죄 주장(항변): 무죄_표 > 유죄_표 → 승소
-                  isAuthorVictory = selectedPost.not_guilty > selectedPost.guilty;
+                  if (isTie) isAuthorVictory = aiRatio < 50; // 동점 시 AI가 피고인 쪽 과실 50 미만이면 무죄(승소)
+                  else isAuthorVictory = selectedPost.not_guilty > selectedPost.guilty;
                 } else if (selectedPost.trial_type === "ACCUSATION") {
-                  // 유죄 주장(기소): 유죄_표 > 무죄_표 → 승소
-                  isAuthorVictory = selectedPost.guilty > selectedPost.not_guilty;
+                  if (isTie) isAuthorVictory = aiRatio >= 50; // 동점 시 AI가 피고인 쪽 50 이상이면 유죄(승소)
+                  else isAuthorVictory = selectedPost.guilty > selectedPost.not_guilty;
                 } else {
-                  // trial_type이 없는 경우 기존 로직 유지 (하위 호환성)
                   isAuthorVictory = aiRatio >= 50;
                 }
                 
                 // 조합된 닉네임 생성
                 const authorName = selectedPost.plaintiff === "익명" && selectedPost.defendant === "익명"
-                  ? "익명의 배심원"
+                  ? "익명의 검사"
                   : selectedPost.plaintiff && selectedPost.defendant
                   ? `${selectedPost.plaintiff}·${selectedPost.defendant}`
-                  : selectedPost.plaintiff || selectedPost.defendant || "익명의 배심원";
+                  : selectedPost.plaintiff || selectedPost.defendant || "익명의 검사";
                 
                 return (
                   <>
@@ -3729,7 +3739,9 @@ function HomeContent() {
                               ? "text-[#FFD700] bg-gradient-to-r from-[#FFD700] to-amber-500 bg-clip-text text-transparent"
                               : "text-zinc-500"
                           }`}>
-                            {isAuthorVictory ? "🏆 최종 승소" : "🔨 최종 패소"}
+                            {isAuthorVictory
+                              ? (selectedPost.trial_type === "DEFENSE" ? "🏆 무죄 확정" : "🏆 유죄 확정")
+                              : (selectedPost.trial_type === "DEFENSE" ? "🔨 유죄 확정" : "🔨 무죄 확정")}
                           </div>
                           
                           {/* 판결문 연출 */}
@@ -3738,9 +3750,9 @@ function HomeContent() {
                           }`}>
                             {isAuthorVictory
                               ? selectedPost.trial_type === "DEFENSE"
-                                ? `${authorName}의 항변이 받아들여졌습니다! [최종 승소]`
-                                : `${authorName}의 기소가 성공했습니다! [최종 승소]`
-                              : `배심원단이 ${authorName}의 주장을 기각했습니다. [최종 패소]`
+                                ? `${authorName}의 항변이 받아들여졌습니다! [무죄 확정]`
+                                : `${authorName}의 기소가 성공했습니다! [유죄 확정]`
+                              : `배심원단이 ${authorName}의 주장을 불기소했습니다. [${selectedPost.trial_type === "DEFENSE" ? "유죄 확정" : "무죄 확정"}]`
                             }
                           </p>
                           
@@ -3773,9 +3785,9 @@ function HomeContent() {
                   <span>익명{maskCommentIp(selectedPost.ip_address) ? ` (${maskCommentIp(selectedPost.ip_address)})` : ""}</span>
                 ) : (
                   <>
-                    {selectedPost.plaintiff ? <span>원고 {selectedPost.plaintiff}</span> : null}
+                    {selectedPost.plaintiff ? <span>검사 {selectedPost.plaintiff}</span> : null}
                     {selectedPost.plaintiff && selectedPost.defendant ? <span>·</span> : null}
-                    {selectedPost.defendant ? <span>피고 {selectedPost.defendant}</span> : null}
+                    {selectedPost.defendant ? <span>피고인 {selectedPost.defendant}</span> : null}
                   </>
                 )}
                 {selectedPost.created_at ? (
@@ -3890,7 +3902,7 @@ function HomeContent() {
                     📜 사건의 발단
                   </div>
                   <p className="mt-1 text-xs text-zinc-500">
-                    원고가 직접 작성한 사건의 경위입니다.
+                    검사가 직접 작성한 사건의 경위입니다.
                   </p>
                 </div>
                 <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 w-full overflow-x-hidden min-w-0">
@@ -3926,14 +3938,11 @@ function HomeContent() {
                 const verdictText = typeof selectedPost.verdict === "string" ? selectedPost.verdict : "";
                 const isDefense =
                   selectedPost.trial_type === "DEFENSE" ||
-                  (verdictText.includes("원고 무죄") && selectedPost.trial_type !== "ACCUSATION");
+                  ((verdictText.includes("피고인 무죄") || verdictText.includes("불기소") || verdictText.includes("원고 무죄")) && selectedPost.trial_type !== "ACCUSATION");
                 const notGuiltyPct = isDefense ? aiRatio : 100 - aiRatio;
                 const guiltyPct = isDefense ? 100 - aiRatio : aiRatio;
                 const isFiftyFifty = guiltyPct === 50 && notGuiltyPct === 50;
                 const primaryLabel = guiltyPct >= notGuiltyPct ? "유죄" : "무죄";
-                const primaryPct = guiltyPct >= notGuiltyPct ? guiltyPct : notGuiltyPct;
-                const neutralReason =
-                  "본 사건은 원고와 피고의 주장이 법리적으로 팽팽히 맞서고 있어, 현재의 알고리즘으로는 확정적 판결을 내릴 수 없는 '법리적 난제'입니다.";
 
                 return (
                   <section className="space-y-4">
@@ -3945,67 +3954,59 @@ function HomeContent() {
                         이 사건에 대한 AI 대법관의 최종 판단과 그 근거입니다.
                       </p>
                     </div>
-                    <div className="relative overflow-hidden rounded-2xl border border-amber-400/40 bg-gradient-to-br from-amber-500/15 via-zinc-900 to-zinc-950 px-3 py-4 md:px-5 md:py-5 shadow-[0_0_35px_rgba(245,158,11,0.25)] w-full">
+                    <div
+                      className={`relative overflow-hidden rounded-2xl border px-3 py-4 md:px-5 md:py-5 w-full transition-all duration-300 ${
+                        isFiftyFifty
+                          ? "border-amber-400/40 bg-gradient-to-br from-amber-500/15 via-zinc-900 to-zinc-950 shadow-[0_0_35px_rgba(245,158,11,0.25)]"
+                          : primaryLabel === "유죄"
+                            ? "border-red-500/50 bg-gradient-to-br from-red-950/25 via-zinc-900 to-zinc-950 shadow-[0_0_30px_rgba(239,68,68,0.2)]"
+                            : "border-blue-500/50 bg-gradient-to-br from-blue-950/25 via-zinc-900 to-zinc-950 shadow-[0_0_30px_rgba(59,130,246,0.2)]"
+                      }`}
+                    >
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-xs sm:text-base font-semibold text-amber-100 min-w-0 truncate">
-                          {isFinished ? "AI 최종 판결" : "AI 현재 예측"}
+                        <span className={`text-xs sm:text-base font-semibold min-w-0 truncate ${
+                          isFiftyFifty ? "text-amber-100" : primaryLabel === "유죄" ? "text-red-200" : "text-blue-200"
+                        }`}>
+                          AI 최종 선고
                         </span>
-                        <span className="inline-flex shrink-0 items-center rounded-full border border-amber-400/80 bg-amber-500/15 px-2.5 py-0.5 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-amber-200 shadow-[0_0_18px_rgba(245,158,11,0.7)]">
-                          AI JUDGMENT
+                        <span className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] ${
+                          isFiftyFifty
+                            ? "border-amber-400/80 bg-amber-500/15 text-amber-200 shadow-[0_0_18px_rgba(245,158,11,0.7)]"
+                            : primaryLabel === "유죄"
+                              ? "border-red-400/70 bg-red-500/20 text-red-200 shadow-[0_0_12px_rgba(239,68,68,0.4)]"
+                              : "border-blue-400/70 bg-blue-500/20 text-blue-200 shadow-[0_0_12px_rgba(59,130,246,0.4)]"
+                        }`}>
+                          AI 대법관
                         </span>
                       </div>
-                      <div className="mt-3 md:mt-4 text-center space-y-1 md:space-y-2">
+                      <div className="mt-4 md:mt-5 text-center">
                         {isFiftyFifty ? (
-                          <>
-                            <p className="text-lg sm:text-2xl md:text-3xl font-black text-amber-400 whitespace-nowrap">
-                              [ ⚖️ 판결 유보 : 판단 불가 ]
-                            </p>
-                            <p className="text-[11px] sm:text-xs text-amber-400/90 whitespace-nowrap tabular-nums">
-                              유죄 50% · 무죄 50%
-                            </p>
-                          </>
+                          <p className="text-xl sm:text-3xl md:text-4xl font-black text-amber-400 whitespace-nowrap font-serif drop-shadow-[0_0_20px_rgba(245,158,11,0.4)]">
+                            [ ⚖️ 판결 유보 : 판단 불가 ]
+                          </p>
                         ) : (
-                          <>
-                            <p
-                              className={`text-lg sm:text-2xl md:text-3xl font-black whitespace-nowrap ${
-                                primaryLabel === "유죄" ? "text-red-300" : "text-blue-300"
-                              }`}
-                            >
-                              {primaryLabel} <span className="tabular-nums">{primaryPct}%</span>
-                            </p>
-                            <p className="text-[11px] sm:text-xs text-zinc-300 whitespace-nowrap">
-                              유죄 {guiltyPct}% · 무죄 {notGuiltyPct}%
-                            </p>
-                          </>
+                          <motion.p
+                            initial={{ opacity: 0, scale: 0.96 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ duration: 0.3, ease: "easeOut" }}
+                            className={`flex items-center justify-center gap-2 text-xl sm:text-3xl md:text-4xl font-black whitespace-nowrap font-serif ${
+                              primaryLabel === "유죄"
+                                ? "text-red-300 drop-shadow-[0_0_24px_rgba(239,68,68,0.5)]"
+                                : "text-blue-300 drop-shadow-[0_0_24px_rgba(59,130,246,0.5)]"
+                            }`}
+                          >
+                            <span className="text-2xl sm:text-4xl md:text-5xl leading-none" aria-hidden>
+                              {primaryLabel === "유죄" ? "🔨" : "⚖️"}
+                            </span>
+                            <span className={`bg-clip-text text-transparent bg-gradient-to-b ${
+                              primaryLabel === "유죄" ? "from-red-200 to-red-500" : "from-blue-200 to-blue-500"
+                            }`}>
+                              피고인 {primaryLabel}
+                            </span>
+                          </motion.p>
                         )}
                       </div>
-                      <div className="mt-3 md:mt-4 relative h-2 rounded-full bg-zinc-800 overflow-visible flex w-full">
-                        <div
-                          className={`h-full rounded-l-full ${
-                            isFiftyFifty ? "bg-red-500/80" : primaryLabel === "유죄" ? "bg-red-500/80" : "bg-blue-500/80"
-                          }`}
-                          style={{
-                            width: `${isFiftyFifty ? 50 : primaryLabel === "유죄" ? guiltyPct : notGuiltyPct}%`,
-                          }}
-                        />
-                        {isFiftyFifty ? (
-                          <span
-                            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex h-5 w-5 items-center justify-center rounded-full border-2 border-amber-400/90 bg-zinc-900 text-[10px] font-black text-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.5)]"
-                            aria-hidden
-                          >
-                            ⚡
-                          </span>
-                        ) : null}
-                        <div
-                          className={`h-full rounded-r-full ${
-                            isFiftyFifty ? "bg-blue-500/80" : primaryLabel === "유죄" ? "bg-blue-500/50" : "bg-red-500/50"
-                          }`}
-                          style={{
-                            width: `${isFiftyFifty ? 50 : primaryLabel === "유죄" ? notGuiltyPct : guiltyPct}%`,
-                          }}
-                        />
-                      </div>
-                      {/* AI 예측 게이지 아래: AI 상세 판결 문구 */}
+                      {/* AI 상세 판결 문구 */}
                       {(() => {
                         const raw =
                           selectedPost.verdict_rationale ??
@@ -4025,12 +4026,6 @@ function HomeContent() {
                           </div>
                         );
                       })()}
-                      <div className="mt-3 md:mt-4 text-[11px] sm:text-xs font-semibold text-amber-100/90">
-                        AI 최종 판결
-                      </div>
-                      <p className="mt-1 text-xs sm:text-base text-amber-50 leading-relaxed whitespace-pre-wrap break-keep">
-                        {isFiftyFifty ? neutralReason : verdictText || "AI 판결 이유가 아직 준비되지 않았습니다."}
-                      </p>
                     </div>
                   </section>
                 );
@@ -4071,7 +4066,7 @@ function HomeContent() {
                                 : (userVotes[selectedPost.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
                             }`}
                           >
-                            {first === "not_guilty" ? "피고 무죄" : "피고 유죄"} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
+                            {first === "not_guilty" ? "피고인 무죄" : "피고인 유죄"} ({first === "not_guilty" ? notGuiltyPct : guiltyPct}%) {first === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
                           </button>
                           <button
                             type="button"
@@ -4083,7 +4078,7 @@ function HomeContent() {
                                 : (userVotes[selectedPost.id] === "guilty" ? "bg-red-500/50 ring-1 ring-red-400/60 text-red-100" : "bg-red-500/20 hover:bg-red-500/30 text-red-400")
                             }`}
                           >
-                            {second === "not_guilty" ? "피고 무죄" : "피고 유죄"} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
+                            {second === "not_guilty" ? "피고인 무죄" : "피고인 유죄"} ({second === "not_guilty" ? notGuiltyPct : guiltyPct}%) {second === "not_guilty" ? selectedPost.not_guilty : selectedPost.guilty}표
                           </button>
                         </>
                       );
@@ -4145,7 +4140,7 @@ function HomeContent() {
                               <div className="bg-amber-500 h-full" style={{ width: `${aiPlaintiffPct}%` }} />
                               <div className="bg-zinc-600 h-full" style={{ width: `${aiDefendantPct}%` }} />
                             </div>
-                            <p className="text-[10px] text-zinc-500 mt-1">원고 {aiPlaintiffPct}% / 피고 {aiDefendantPct}%</p>
+                            <p className="text-[10px] text-zinc-500 mt-1">검사 {aiPlaintiffPct}% / 피고인 {aiDefendantPct}%</p>
                           </div>
                           <div className="rounded-xl border border-zinc-600 bg-zinc-800/50 p-3">
                             <p className="text-[10px] font-bold uppercase text-zinc-400 mb-1">배심원단</p>

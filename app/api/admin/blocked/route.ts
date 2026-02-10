@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase";
+import { createSupabaseServerClient, createSupabaseServiceRoleClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
 
 export const runtime = "nodejs";
@@ -25,7 +25,7 @@ export async function GET() {
       return NextResponse.json({ error: "대법관 권한이 필요합니다." }, { status: 403 });
     }
 
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServiceRoleClient() ?? createSupabaseServerClient();
 
     const { data, error } = await supabase
       .from("blocked_ips")
@@ -90,7 +90,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "ip_address가 필요합니다." }, { status: 400 });
     }
 
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServiceRoleClient() ?? createSupabaseServerClient();
     const { error } = await supabase.from("blocked_ips").delete().eq("ip_address", ip);
 
     if (error) {

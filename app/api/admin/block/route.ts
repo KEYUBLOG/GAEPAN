@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase";
+import { createSupabaseServerClient, createSupabaseServiceRoleClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
 
 export const runtime = "nodejs";
@@ -42,7 +42,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const supabase = createSupabaseServerClient();
+    // RLS를 우회해 posts/blocked_ips 접근. service role 없으면 anon 사용(RLS 정책 필요)
+    const supabase = createSupabaseServiceRoleClient() ?? createSupabaseServerClient();
 
     // 1) 대상의 IP 찾기
     let ip: string | null = null;
@@ -75,7 +76,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2) blocked_ips에 upsert
+    // 2) blocked_ips에 upsert (service role 사용 시 RLS 우회)
     const { error: upsertError } = await supabase
       .from("blocked_ips")
       .upsert(

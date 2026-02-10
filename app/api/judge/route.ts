@@ -117,10 +117,10 @@ function buildMockVerdict(req: JudgeRequest): JudgeVerdict {
 
   const titleOut = `사건 개요: “${req.title}"`;
 
-  // 무죄 주장(DEFENSE)이고 원고 잘못이 없을 때 → 원고 무죄 판결
+  // 무죄 주장(DEFENSE)이고 검사 측 귀책이 없을 때 → 피고인 무죄(불기소)
   if (req.trial_type === "DEFENSE" && plaintiff <= 10) {
-    const rationale = "원고에게 귀책사유가 없다고 인정된다. 과실은 전부 피고에게 있다.";
-    const verdict = "원고 무죄. 과실비율은 원고 0% / 피고 100%로 정한다.";
+    const rationale = "검사 측 귀책사유가 없다고 인정된다. 과실은 전부 피고인에게 있다.";
+    const verdict = "본 대법관은 피고인에게 다음과 같이 선고한다. 피고인 무죄. 불기소. 과실비율은 검사 0% / 피고인 100%로 정한다.";
     return {
       title: titleOut,
       ratio: { plaintiff: 0, defendant: 100, rationale },
@@ -129,14 +129,14 @@ function buildMockVerdict(req: JudgeRequest): JudgeVerdict {
   }
 
   const guiltySide =
-    defendant > plaintiff ? `피고(${req.defendant ?? "익명"})` : `원고(${req.plaintiff ?? "익명"})`;
+    defendant > plaintiff ? `피고인(${req.defendant ?? "익명"})` : `검사(${req.plaintiff ?? "익명"})`;
 
   const guiltyLevel =
     Math.max(defendant, plaintiff) >= 70 ? "중대" : Math.max(defendant, plaintiff) >= 55 ? "상당" : "경미";
 
-  const rationale = `기록 기준으로 보면 한쪽만 ‘완벽하게’ 잘못했다고 보기 어렵다. 다만 반복성/강도/선제행위가 더 큰 쪽에 과실을 더 얹는다. 원고 ${plaintiff}%, 피고 ${defendant}%는 “누가 더 성숙하게 행동했는가”에 대한 점수표다.`;
+  const rationale = `기록 기준으로 보면 한쪽만 ‘완벽하게’ 잘못했다고 보기 어렵다. 다만 반복성/강도/선제행위가 더 큰 쪽에 과실을 더 얹는다. 검사 ${plaintiff}%, 피고인 ${defendant}%는 “누가 더 성숙하게 행동했는가”에 대한 점수표다.`;
 
-  const verdict = `${guiltySide} ${guiltyLevel} 유죄. 과실비율은 원고 ${plaintiff}% / 피고 ${defendant}%로 정한다.`;
+  const verdict = `본 대법관은 피고인에게 다음과 같이 선고한다. ${guiltySide} ${guiltyLevel} 유죄. 과실비율은 검사 ${plaintiff}% / 피고인 ${defendant}%로 정한다.`;
 
   return { title: titleOut, ratio: { plaintiff, defendant, rationale }, verdict };
 }
@@ -160,40 +160,46 @@ async function callGemini(req: JudgeRequest): Promise<JudgeVerdict> {
   const model = genAI.getGenerativeModel({ model: modelName });
 
   const system = [
-    "너는 'GAEPAN'의 AI 판사다.",
-    "컨셉: 아주 냉소적이고, 논리적으로만 판단하는 독설가. 감정호소는 감점.",
-    "사실관계/인과/책임을 깔끔히 분해해서 판단하라.",
+    "너는 형사 재판 전문 '개판 AI 대법관'이다. GAEPAN 법정의 최종 선고를 담당한다.",
+    "컨셉: 냉정하고 논리적으로만 판단한다. 사실관계·인과·책임을 명확히 분해하고, 피고인의 행위가 '고의'인지 '과실'인지 반드시 논리적으로 분석하여 rationale에 언급하라.",
+    "",
+    "rationale(상세 판결) 규칙:",
+    "- rationale에는 판단 근거(사실관계·고의/과실 분석)와 함께 최종 선고 내용을 반드시 포함하라.",
+    "- 유죄 시: '징역 n년', '징역 n개월', '사회봉사 n시간', '벌금 n원' 등 형량을 rationale 끝에 명시하라.",
+    "- 무죄/불기소 시: '피고인 무죄', '불기소' 등 선고 결론을 rationale 끝에 명시하라.",
+    "",
+    "당사자 명확성(최우선):",
+    "- 본문(사건 경위)에서 검사(기소 측)와 피고인이 누구인지 명확히 구분되지 않으면 판결하지 말고 선고를 유보하라.",
+    "- 이 경우 반드시 title은 '판결 불가(당사자 불명)', ratio는 plaintiff 50 / defendant 50, rationale은 '본문에서 검사와 피고인이 명확히 구분되지 않음.', verdict는 '본 대법관은 검사·피고인이 본문에서 명확히 구분되지 않아 선고를 유보한다.'만 출력하라.",
+    "",
+    "선고문 규칙:",
+    "- verdict 문자열은 반드시 '본 대법관은 피고인에게 다음과 같이 선고한다.'로 시작한다. (선고 유보 시에도 동일하게 시작한 뒤 유보 문구를 이어 붙인다.)",
+    "- 유죄 선고 시: 사연의 심각성을 분석하여 형량을 포함한다. 예: '징역 n년', '징역 n개월', '사회봉사 n시간', '벌금 n원' 등 구체적 선고를 문장 끝에 포함한다.",
+    "- 무죄 또는 불기소 시: verdict에 '피고인 무죄' 또는 '불기소'로 판단을 명시한다.",
     "",
     "출력 규칙(최우선):",
-    "- 반드시 '유효한 JSON'만 출력한다. 마크다운/설명/코드펜스/여는말/닫는말 금지.",
-    "- 아래 스키마를 정확히 지킨다. (키 이름 변경 금지)",
+    "- 반드시 유효한 JSON만 출력한다. 마크다운/코드펜스/여는말/닫는말 금지.",
+    "- ratio 키: plaintiff = 검사(기소) 측 책임 비율 0~100, defendant = 피고인 측 책임 비율 0~100. plaintiff + defendant = 100.",
     "",
-    "반환 JSON 스키마 (punchline 없이):",
-    '{',
-    '  "title": string,',
-    '  "ratio": { "plaintiff": number, "defendant": number, "rationale": string },',
-    '  "verdict": string',
-    "}",
+    "반환 JSON 스키마 (키 이름 변경 금지):",
+    '{ "title": string, "ratio": { "plaintiff": number, "defendant": number, "rationale": string }, "verdict": string }',
     "",
-    "제약:",
-    "- ratio.plaintiff + ratio.defendant 는 반드시 100 (정수)이어야 한다.",
-    "- 비율은 0~100 범위. 너무 애매하면 50:50으로 가도 된다.",
-    "- 입력에 없는 개인정보를 추정/창작하지 마라.",
+    "제약: ratio는 정수, 합 100. 입력에 없는 개인정보를 창작하지 마라.",
   ].join("\n");
 
   const trialInstruction =
     req.trial_type === "DEFENSE"
-      ? "재판 목적: 무죄 주장(항변). 원고(나)에게 잘못이 없으면 반드시 verdict에 '원고 무죄'로 판단하고, ratio는 원고 0 / 피고 100으로 한다. 원고 과실이 0에 가깝다면 원고 무죄로 판결하라."
-      : "재판 목적: 유죄 주장(기소). 피고에게 과실이 있으면 유죄로 판단한다.";
+      ? "재판 목적: 무죄 주장(항변). 검사(나) 측 귀책이 없으면 verdict에 '본 대법관은 피고인에게 다음과 같이 선고한다.'로 시작한 뒤 '피고인 무죄. 불기소.'로 판단하고, ratio는 plaintiff 0 / defendant 100으로 한다."
+      : "재판 목적: 유죄 주장(기소). 피고인에게 고의 또는 과실이 인정되면 유죄로 선고하고, 심각도에 따라 징역·사회봉사·벌금 등 형량을 verdict 문장 안에 포함하라.";
 
   const user = [
-    "아래 사건을 판결하라.",
+    "아래 사건에 대해 형사 재판 선고문을 작성하라.",
     "",
     trialInstruction,
     "",
     `사건 제목: ${req.title}`,
-    `원고(나): ${req.plaintiff}`,
-    `피고(상대): ${req.defendant}`,
+    `검사(기소 측): ${req.plaintiff}`,
+    `피고인: ${req.defendant}`,
     "사건 경위(상세):",
     req.details,
   ].join("\n");
@@ -227,11 +233,14 @@ async function callGemini(req: JudgeRequest): Promise<JudgeVerdict> {
   parsed.ratio.plaintiff = p2;
   parsed.ratio.defendant = d2;
 
-  // 무죄 주장(DEFENSE)이고 원고 잘못이 없을 때 → 원고 무죄 판결로 통일
+  // 무죄 주장(DEFENSE)이고 검사 측 귀책이 없을 때 → 피고인 무죄(불기소)로 통일
   if (req.trial_type === "DEFENSE" && p2 <= 10) {
     parsed.ratio.plaintiff = 0;
     parsed.ratio.defendant = 100;
-    parsed.verdict = "원고 무죄. 과실비율은 원고 0% / 피고 100%로 정한다.";
+    const prefix = parsed.verdict.trimStart().startsWith("본 대법관은") ? "" : "본 대법관은 피고인에게 다음과 같이 선고한다. ";
+    parsed.verdict = `${prefix}피고인 무죄. 불기소. 과실비율은 검사 0% / 피고인 100%로 정한다.`;
+  } else if (parsed.verdict && !parsed.verdict.trimStart().startsWith("본 대법관은")) {
+    parsed.verdict = "본 대법관은 피고인에게 다음과 같이 선고한다. " + parsed.verdict.trimStart();
   }
 
   return parsed;
@@ -396,6 +405,20 @@ export async function POST(request: Request) {
       maxRow?.case_number != null && Number.isFinite(Number(maxRow.case_number))
         ? Number(maxRow.case_number) + 1
         : 1;
+
+    // 검사·피고인이 본문에서 명확하지 않아 선고 유보한 경우 → DB에 저장하지 않고 판결불가 반환
+    const isVerdictDeferred =
+      (typeof verdict.verdict === "string" && verdict.verdict.includes("선고를 유보")) ||
+      (typeof verdict.title === "string" && verdict.title.includes("판결 불가"));
+    if (isVerdictDeferred) {
+      console.log("[GAEPAN][POST /api/judge] verdict deferred (당사자 불명), returning 판결불가");
+      return NextResponse.json({
+        ok: true,
+        status: "판결불가",
+        verdict: null,
+        message: "본문에서 검사와 피고인이 명확히 구분되지 않아 판결할 수 없습니다. 당사자를 명확히 적어 주세요.",
+      });
+    }
 
     const rationaleToSave =
       typeof verdict.ratio?.rationale === "string" ? verdict.ratio.rationale : null;

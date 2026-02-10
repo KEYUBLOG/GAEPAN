@@ -167,7 +167,7 @@ function VerdictSlideContent() {
               <span className="w-3 h-3 rounded-sm bg-amber-600/80" />
               <span className="text-lg font-bold text-zinc-400">사건의 발단</span>
             </div>
-            <p className="text-sm text-zinc-500 mb-4">원고가 직접 작성한 사건의 경위입니다.</p>
+            <p className="text-sm text-zinc-500 mb-4">검사가 직접 작성한 사건의 경위입니다.</p>
           </div>
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-6">
             <p className="text-[22px] leading-relaxed text-zinc-300 whitespace-pre-wrap">
