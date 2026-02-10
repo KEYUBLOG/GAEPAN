@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
+import { sanitizeCaseContentDisplay } from "@/lib/sanitize-verdict-display";
 
 const TRIAL_DURATION_MS = 24 * 60 * 60 * 1000;
 
@@ -171,7 +172,7 @@ function VerdictSlideContent() {
           </div>
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-6">
             <p className="text-[22px] leading-relaxed text-zinc-300 whitespace-pre-wrap">
-              {post.content || "(내용 없음)"}
+              {sanitizeCaseContentDisplay(post.content) || "(내용 없음)"}
             </p>
           </div>
         </div>

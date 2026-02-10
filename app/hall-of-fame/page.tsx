@@ -10,6 +10,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { maskCommentIp } from "@/lib/comment";
 import { useBlockedKeywords } from "@/lib/useBlockedKeywords";
 import { parseImageUrls } from "@/lib/image-urls";
+import { sanitizeVerdictDisplay, sanitizeCaseContentDisplay } from "@/lib/sanitize-verdict-display";
 
 const notoSerif = Noto_Serif_KR({
   weight: ["400", "600", "700"],
@@ -846,7 +847,7 @@ function HallOfFameContent() {
   };
 
   return (
-    <div className={`min-h-screen bg-black overflow-x-hidden ${notoSerif.className}`}>
+    <div className={`min-h-screen bg-zinc-950 overflow-x-hidden ${notoSerif.className}`}>
       {/* 네비게이션 */}
       <nav className="px-4 py-3 md:px-6 md:py-4 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50 font-sans">
         <Logo />
@@ -1407,7 +1408,7 @@ function HallOfFameContent() {
                 <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 w-full overflow-x-hidden min-w-0">
                   {selectedPost.content ? (
                     <p className="text-sm sm:text-base text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
-                      {maskBlocked(selectedPost.content)}
+                      {maskBlocked(sanitizeCaseContentDisplay(selectedPost.content))}
                     </p>
                   ) : (
                     <p className="text-xs text-zinc-500">
@@ -1509,7 +1510,7 @@ function HallOfFameContent() {
                           "";
                         const rationale = typeof raw === "string" ? raw : "";
                         const displayText =
-                          rationale.trim() || "상세 판결 근거가 기록되지 않은 사건입니다.";
+                          sanitizeVerdictDisplay(rationale) || "상세 판결 근거가 기록되지 않은 사건입니다.";
                         return (
                           <div className="mt-3 md:mt-4">
                             <div className="text-[11px] sm:text-xs font-semibold text-amber-100/90 mb-1">
@@ -1559,7 +1560,7 @@ function HallOfFameContent() {
                           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
                             <p className="text-[10px] font-bold uppercase text-amber-500/80 mb-1">AI 판사</p>
                             <p className="text-sm font-bold text-amber-200">
-                              {aiVerdict}({aiPct}%)
+                              피고인 {aiVerdict}
                             </p>
                             <div className="mt-2 h-2 bg-zinc-800 rounded-full overflow-hidden flex">
                               <div className="bg-amber-500 h-full" style={{ width: `${aiPlaintiffPct}%` }} />
@@ -1570,7 +1571,7 @@ function HallOfFameContent() {
                           <div className="rounded-xl border border-zinc-600 bg-zinc-800/50 p-3">
                             <p className="text-[10px] font-bold uppercase text-zinc-400 mb-1">배심원단</p>
                             <p className="text-sm font-bold text-zinc-200">
-                              {juryVerdict}({juryPct}%)
+                              피고인 {juryVerdict}
                             </p>
                             <div className="mt-2 h-2 bg-zinc-800 rounded-full overflow-hidden flex">
                               <div className="bg-red-500/70 h-full" style={{ width: `${juryGuiltyPct}%` }} />

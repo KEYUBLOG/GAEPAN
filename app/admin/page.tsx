@@ -243,7 +243,7 @@ export default function AdminPage() {
 
   if (checking) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
         <div className="text-zinc-400">확인 중...</div>
       </div>
     );
@@ -251,7 +251,7 @@ export default function AdminPage() {
 
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center px-4">
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center px-4">
         <div className="w-full max-w-md">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-8 space-y-6">
             <div className="text-center">
@@ -300,7 +300,7 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black py-12 px-4">
+    <div className="min-h-screen bg-zinc-950 py-12 px-4">
       <div className="max-w-2xl mx-auto">
         <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-8 space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

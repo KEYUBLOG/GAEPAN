@@ -230,7 +230,7 @@ export default function PetitionDetailPage({ params }: { params: Promise<{ id: s
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
         <div className="text-zinc-400">불러오는 중...</div>
       </div>
     );
@@ -238,7 +238,7 @@ export default function PetitionDetailPage({ params }: { params: Promise<{ id: s
 
   if (error || !petition) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center px-4">
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center px-4">
         <div className="text-center">
           <p className="text-red-400 mb-4">{error ?? "청원을 찾을 수 없습니다."}</p>
           <Link
@@ -253,7 +253,7 @@ export default function PetitionDetailPage({ params }: { params: Promise<{ id: s
   }
 
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen bg-zinc-950">
       {/* 삭제 결과 토스트 */}
       {deleteToast ? (
         <div

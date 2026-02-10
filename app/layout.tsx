@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
+import { Footer } from "@/app/components/Footer";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -85,13 +86,16 @@ export default function RootLayout({
   return (
     <html lang="ko" className="dark">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased overflow-x-hidden`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased overflow-x-hidden flex flex-col min-h-screen bg-zinc-950`}
       >
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
-        {children}
+        <main className="flex-1">{children}</main>
+        <Footer />
+        {/* 실시간 재판소 고정 바 높이만큼 여백 — 푸터가 바에 가려지지 않도록 */}
+        <div className="h-16 shrink-0 bg-zinc-950" aria-hidden />
         <Analytics />
       </body>
     </html>

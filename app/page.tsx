@@ -11,6 +11,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { maskCommentIp } from "@/lib/comment";
 import { useBlockedKeywords } from "@/lib/useBlockedKeywords";
 import { parseImageUrls } from "@/lib/image-urls";
+import { sanitizeVerdictDisplay, sanitizeCaseContentDisplay } from "@/lib/sanitize-verdict-display";
 
 const TRIAL_DURATION_MS = 24 * 60 * 60 * 1000;
 const URGENT_THRESHOLD_MS = 3 * 60 * 60 * 1000;
@@ -331,12 +332,9 @@ function HomeContent() {
   const [isMobileLogOpen, setIsMobileLogOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  const [todayStats, setTodayStats] = useState<{
-    total: number;
-    wins: number;
-    losses: number;
-  } | null>(null);
-  const [todayStatsError, setTodayStatsError] = useState<string | null>(null);
+  const [todayConfirmed, setTodayConfirmed] = useState<number | null>(null);
+  const [cumulativeConfirmed, setCumulativeConfirmed] = useState<number | null>(null);
+  const [cumulativeStatsError, setCumulativeStatsError] = useState<string | null>(null);
 
   const firstFieldRef = useRef<HTMLInputElement | null>(null);
   const postsListRef = useRef<HTMLElement | null>(null);
@@ -365,70 +363,82 @@ function HomeContent() {
     };
   }, []);
 
-  // 오늘 확정된 재판 집계 (실시간 사법 전광판) — "오늘 투표가 끝난" 사건 기준
+  // 오늘 확정된 사건 수 (실시간 사법 전광판 — 좌측)
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
-
-    const loadTodayStats = async () => {
+    const loadTodayConfirmed = async () => {
       try {
         const now = new Date();
         const startOfToday = new Date(now);
         startOfToday.setHours(0, 0, 0, 0);
         const endOfToday = new Date(startOfToday);
         endOfToday.setDate(endOfToday.getDate() + 1);
-        // 투표가 오늘 끝날 수 있는 글: 최소 2일치 (어제 생성 → 오늘 24h 만료)
         const fromDate = new Date(startOfToday);
         fromDate.setDate(fromDate.getDate() - 2);
 
         const { data, error } = await supabase
           .from("posts")
-          .select("id, guilty, not_guilty, ratio, trial_type, created_at, voting_ended_at")
+          .select("id, created_at, voting_ended_at")
+          .neq("status", "판결불가")
           .gte("created_at", fromDate.toISOString());
 
         if (error) throw error;
 
-        const rows = (data ?? []) as Array<{
-          id: string;
-          guilty: number | null;
-          not_guilty: number | null;
-          ratio: number | null;
-          trial_type: "DEFENSE" | "ACCUSATION" | null;
-          created_at: string | null;
-          voting_ended_at: string | null;
-        }>;
-
-        // 1) 투표가 이미 끝난 글만
-        const completed = rows.filter((row) =>
-          !isVotingOpen(row.created_at ?? null, row.voting_ended_at ?? null),
-        );
-
-        // 2) "투표가 끝난 시각"이 오늘(로컬 날짜)인 것만 — 오늘 확정된 사건
+        const rows = (data ?? []) as Array<{ created_at: string | null; voting_ended_at: string | null }>;
         const endedAt = (row: (typeof rows)[0]) => {
           if (row.voting_ended_at) return new Date(row.voting_ended_at).getTime();
           const created = row.created_at ? new Date(row.created_at).getTime() : 0;
           return created + TRIAL_DURATION_MS;
         };
-        const todayCompleted = completed.filter((row) => {
+        const todayCompleted = rows.filter((row) => {
+          if (isVotingOpen(row.created_at ?? null, row.voting_ended_at ?? null)) return false;
           const t = endedAt(row);
           return t >= startOfToday.getTime() && t < endOfToday.getTime();
         });
+        setTodayConfirmed(todayCompleted.length);
+      } catch {
+        setTodayConfirmed(null);
+      }
+    };
+    loadTodayConfirmed();
+    const channel = supabase
+      .channel("today-confirmed-realtime")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "posts" }, () => loadTodayConfirmed())
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "posts" }, () => loadTodayConfirmed())
+      .subscribe(() => {});
+    const t = setInterval(loadTodayConfirmed, 30_000);
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(t);
+    };
+  }, []);
 
-        const total = todayCompleted.length;
-        let wins = 0;
+  // 누적 확정된 사건 수 (실시간 사법 전광판 — 우측)
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
 
-        for (const row of todayCompleted) {
-          const p = {
-            trial_type: row.trial_type ?? null,
-            guilty: Number(row.guilty) || 0,
-            not_guilty: Number(row.not_guilty) || 0,
-            ratio: typeof row.ratio === "number" ? row.ratio : null,
-          };
-          if (isAuthorVictoryFromPost(p)) wins += 1;
-        }
+    const loadCumulativeConfirmed = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("posts")
+          .select("id, created_at, voting_ended_at")
+          .neq("status", "판결불가")
+          .limit(10000);
 
-        const losses = Math.max(0, total - wins);
-        setTodayStats({ total, wins, losses });
-        setTodayStatsError(null);
+        if (error) throw error;
+
+        const rows = (data ?? []) as Array<{
+          id: string;
+          created_at: string | null;
+          voting_ended_at: string | null;
+        }>;
+
+        const count = rows.filter((row) =>
+          !isVotingOpen(row.created_at ?? null, row.voting_ended_at ?? null),
+        ).length;
+
+        setCumulativeConfirmed(count);
+        setCumulativeStatsError(null);
       } catch (err) {
         const msg =
           err instanceof Error
@@ -436,29 +446,28 @@ function HomeContent() {
             : (err && typeof err === "object" && "message" in (err as object)
               ? String((err as { message?: unknown }).message)
               : JSON.stringify(err));
-        console.error("[GAEPAN] 오늘 재판 현황 집계 오류:", msg, err);
-        setTodayStatsError("오늘 재판 현황을 불러오지 못했습니다.");
+        console.error("[GAEPAN] 누적 확정 사건 집계 오류:", msg, err);
+        setCumulativeStatsError("누적 확정 사건을 불러오지 못했습니다.");
       }
     };
 
-    loadTodayStats();
+    loadCumulativeConfirmed();
 
-    // posts INSERT/UPDATE 시 전광판 즉시 갱신
     const channel = supabase
-      .channel("today-stats-realtime")
+      .channel("cumulative-stats-realtime")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "posts" },
-        () => { loadTodayStats(); },
+        () => { loadCumulativeConfirmed(); },
       )
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "posts" },
-        () => { loadTodayStats(); },
+        () => { loadCumulativeConfirmed(); },
       )
       .subscribe(() => {});
 
-    const interval = setInterval(loadTodayStats, 30_000);
+    const interval = setInterval(loadCumulativeConfirmed, 30_000);
 
     return () => {
       supabase.removeChannel(channel);
@@ -760,7 +769,7 @@ function HomeContent() {
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
     
-    // 초기 데이터 로드 (최근 50개)
+    // 초기 데이터 로드 (최근 50개) — 진행 중/확정 구분 없이 최근 기록 표시
     supabase
       .from("votes")
       .select("id, post_id, ip_address, choice, created_at")
@@ -777,8 +786,6 @@ function HomeContent() {
             const key = `${postId}:${voterId}`;
             if (seen.has(key)) continue;
             const post = recentPosts.find((p) => p.id === postId);
-            // 확정된 사건만 전광판에 표시 (투표 종료된 사건)
-            if (!post || isVotingOpen(post.created_at, post.voting_ended_at)) continue;
             seen.add(key);
             const nickname = generateCourtNickname(postId, voterId);
             voteLogs.push({
@@ -795,7 +802,7 @@ function HomeContent() {
           }
         }
 
-        // 댓글 초기 로드 후 투표 로그와 병합
+        // 댓글 초기 로드 후 투표 로그와 병합 (진행 중/확정 모두 포함)
         void Promise.resolve(
           supabase
             .from("comments")
@@ -804,25 +811,19 @@ function HomeContent() {
             .limit(50)
         )
           .then(({ data: commentData }) => {
-            const commentLogs: CourtLogEntry[] = (commentData ?? [])
-              .filter((c: Record<string, unknown>) => {
-                const postId = String(c.post_id ?? "");
-                const post = recentPosts.find((p) => p.id === postId);
-                return post && !isVotingOpen(post.created_at, post.voting_ended_at);
-              })
-              .map((c: Record<string, unknown>) => {
-                const postId = String(c.post_id ?? "");
-                const voterId = String(c.ip_address ?? "");
-                const post = recentPosts.find((p) => p.id === postId);
-                return {
-                  kind: "comment" as const,
-                  id: `comment-${c.id}`,
-                  post_id: postId,
-                  post_title: post?.title ?? null,
-                  nickname: generateCourtNickname(postId, voterId),
-                  created_at: String(c.created_at ?? ""),
-                };
-              });
+            const commentLogs: CourtLogEntry[] = (commentData ?? []).map((c: Record<string, unknown>) => {
+              const postId = String(c.post_id ?? "");
+              const voterId = String(c.ip_address ?? "");
+              const post = recentPosts.find((p) => p.id === postId);
+              return {
+                kind: "comment" as const,
+                id: `comment-${c.id}`,
+                post_id: postId,
+                post_title: post?.title ?? null,
+                nickname: generateCourtNickname(postId, voterId),
+                created_at: String(c.created_at ?? ""),
+              };
+            });
             const merged = [...voteLogs.reverse(), ...commentLogs].sort(
               (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
             );
@@ -846,8 +847,6 @@ function HomeContent() {
           
           if (loggedVotes.current.has(key)) return;
           const post = recentPosts.find((p) => p.id === postId);
-          // 확정된 사건만 전광판에 표시
-          if (!post || isVotingOpen(post.created_at, post.voting_ended_at)) return;
           loggedVotes.current.add(key);
           const nickname = generateCourtNickname(postId, voterId);
           const voteType = (row.choice === "guilty" ? "guilty" : "not_guilty") as "guilty" | "not_guilty";
@@ -862,7 +861,7 @@ function HomeContent() {
             nickname,
             created_at: String(row?.created_at ?? ""),
           };
-          
+
           setCourtLogs((prev) => {
             const updated = [newLog, ...prev];
             return updated.slice(0, 100);
@@ -889,7 +888,6 @@ function HomeContent() {
           const postId = String(row?.post_id ?? "");
           const voterId = String(row?.ip_address ?? "");
           const post = recentPosts.find((p) => p.id === postId);
-          if (!post || isVotingOpen(post.created_at, post.voting_ended_at)) return;
           const newLog: CourtLogEntry = {
             kind: "comment",
             id: `comment-${row?.id ?? ""}`,
@@ -2021,45 +2019,21 @@ function HomeContent() {
             <h3 className="text-[11px] md:text-xs font-semibold tracking-[0.2em] uppercase text-zinc-400">
               실시간 사법 전광판
             </h3>
-            <p className="text-[10px] text-zinc-500">
-              오늘 00:00 이후 확정 판결 기준
-            </p>
           </div>
-          {todayStatsError ? (
-            <p className="text-[11px] text-red-400 text-center">{todayStatsError}</p>
+          {cumulativeStatsError ? (
+            <p className="text-[11px] text-red-400 text-center">{cumulativeStatsError}</p>
           ) : (
-            <div className="grid grid-cols-2 gap-4 md:flex md:flex-row md:flex-wrap md:justify-center md:divide-x md:divide-zinc-800">
-              <div className="flex flex-col items-center justify-center md:px-4 text-center">
+            <div className="flex flex-row items-stretch justify-center gap-6 md:gap-12">
+              <div className="flex flex-col items-center justify-center text-center flex-1 min-w-0">
                 <span className="text-[11px] text-zinc-500 mb-1">오늘 확정된 사건</span>
-                <div className="text-xl md:text-2xl font-black">
-                  <AnimatedNumber value={todayStats?.total ?? 0} />
-                </div>
-              </div>
-              <div className="flex flex-col items-center justify-center md:px-4 text-center">
-                <span className="text-[11px] text-zinc-500 mb-1 flex items-center gap-1">
-                  오늘 승소 <span className="text-[10px]">🔥</span>
-                </span>
-                <div className="text-xl md:text-2xl font-black text-amber-400">
-                  <AnimatedNumber value={todayStats?.wins ?? 0} />
-                </div>
-              </div>
-              <div className="flex flex-col items-center justify-center md:px-4 text-center">
-                <span className="text-[11px] text-zinc-500 mb-1">오늘 패소</span>
                 <div className="text-xl md:text-2xl font-black text-zinc-200">
-                  <AnimatedNumber value={todayStats?.losses ?? 0} />
+                  <AnimatedNumber value={todayConfirmed ?? 0} />
                 </div>
               </div>
-              <div className="flex flex-col items-center justify-center md:px-4 text-center">
-                <span className="text-[11px] text-zinc-500 mb-1">승소율</span>
-                <div className="text-xl md:text-2xl font-black text-emerald-400">
-                  <AnimatedNumber
-                    value={
-                      todayStats && todayStats.total > 0
-                        ? Math.round((todayStats.wins / todayStats.total) * 100)
-                        : 0
-                    }
-                  />
-                  <span className="text-sm ml-1">%</span>
+              <div className="flex flex-col items-center justify-center text-center flex-1 min-w-0 border-l border-zinc-700 pl-6 md:pl-12">
+                <span className="text-[11px] text-amber-400/90 mb-1 font-semibold">누적 확정된 사건</span>
+                <div className="text-2xl md:text-3xl font-black text-amber-400">
+                  <AnimatedNumber value={cumulativeConfirmed ?? 0} />
                 </div>
               </div>
             </div>
@@ -3908,7 +3882,7 @@ function HomeContent() {
                 <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 w-full overflow-x-hidden min-w-0">
                   {selectedPost.content ? (
                     <p className="text-sm sm:text-base text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
-                      {maskBlocked(selectedPost.content)}
+                      {maskBlocked(sanitizeCaseContentDisplay(selectedPost.content))}
                     </p>
                   ) : (
                     <p className="text-xs text-zinc-500">
@@ -4014,7 +3988,7 @@ function HomeContent() {
                           "";
                         const rationale = typeof raw === "string" ? raw : "";
                         const displayText =
-                          rationale.trim() || "상세 판결 근거가 기록되지 않은 사건입니다.";
+                          sanitizeVerdictDisplay(rationale) || "상세 판결 근거가 기록되지 않은 사건입니다.";
                         return (
                           <div className="mt-3 md:mt-4">
                             <div className="text-[11px] sm:text-xs font-semibold text-amber-100/90 mb-1">
@@ -4134,7 +4108,7 @@ function HomeContent() {
                           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
                             <p className="text-[10px] font-bold uppercase text-amber-500/80 mb-1">AI 판사</p>
                             <p className="text-sm font-bold text-amber-200">
-                              {aiVerdict}({aiPct}%)
+                              피고인 {aiVerdict}
                             </p>
                             <div className="mt-2 h-2 bg-zinc-800 rounded-full overflow-hidden flex">
                               <div className="bg-amber-500 h-full" style={{ width: `${aiPlaintiffPct}%` }} />
@@ -4145,7 +4119,7 @@ function HomeContent() {
                           <div className="rounded-xl border border-zinc-600 bg-zinc-800/50 p-3">
                             <p className="text-[10px] font-bold uppercase text-zinc-400 mb-1">배심원단</p>
                             <p className="text-sm font-bold text-zinc-200">
-                              {juryVerdict}({juryPct}%)
+                              피고인 {juryVerdict}
                             </p>
                             <div className="mt-2 h-2 bg-zinc-800 rounded-full overflow-hidden flex">
                               <div className="bg-red-500/70 h-full" style={{ width: `${juryGuiltyPct}%` }} />
