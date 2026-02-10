@@ -172,10 +172,6 @@ async function callGemini(req: JudgeRequest): Promise<JudgeVerdict> {
     "- 유죄 시: '징역 n년', '징역 n개월', '사회봉사 n시간', '벌금 n원' 등 형량을 rationale 끝에 명시하라.",
     "- 무죄/불기소 시: '피고인 무죄', '불기소' 등 선고 결론을 rationale 끝에 명시하라.",
     "",
-    "당사자 명확성(최우선):",
-    "- 본문(사건 경위)에서 검사(기소 측)와 피고인이 누구인지 명확히 구분되지 않으면 판결하지 말고 선고를 유보하라.",
-    "- 이 경우 반드시 title은 '판결 불가(당사자 불명)', ratio는 plaintiff 50 / defendant 50, rationale은 '본문에서 검사와 피고인이 명확히 구분되지 않음.', verdict는 '본 대법관은 검사·피고인이 본문에서 명확히 구분되지 않아 선고를 유보한다.'만 출력하라.",
-    "",
     "선고문 규칙:",
     "- verdict 문자열은 반드시 '본 대법관은 피고인에게 다음과 같이 선고한다.'로 시작한다. (선고 유보 시에도 동일하게 시작한 뒤 유보 문구를 이어 붙인다.)",
     "- 유죄 선고 시: 사연의 심각성을 분석하여 형량을 포함한다. 예: '징역 n년', '징역 n개월', '사회봉사 n시간', '벌금 n원' 등 구체적 선고를 문장 끝에 포함한다.",
@@ -441,20 +437,6 @@ export async function POST(request: Request) {
       maxRow?.case_number != null && Number.isFinite(Number(maxRow.case_number))
         ? Number(maxRow.case_number) + 1
         : 1;
-
-    // 검사·피고인이 본문에서 명확하지 않아 선고 유보한 경우 → DB에 저장하지 않고 판결불가 반환
-    const isVerdictDeferred =
-      (typeof verdict.verdict === "string" && verdict.verdict.includes("선고를 유보")) ||
-      (typeof verdict.title === "string" && verdict.title.includes("판결 불가"));
-    if (isVerdictDeferred) {
-      console.log("[GAEPAN][POST /api/judge] verdict deferred (당사자 불명), returning 판결불가");
-      return NextResponse.json({
-        ok: true,
-        status: "판결불가",
-        verdict: null,
-        message: "본문에서 검사와 피고인이 명확히 구분되지 않아 판결할 수 없습니다. 당사자를 명확히 적어 주세요.",
-      });
-    }
 
     const rationaleToSave =
       typeof verdict.ratio?.rationale === "string" ? verdict.ratio.rationale : null;

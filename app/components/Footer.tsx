@@ -27,6 +27,9 @@ export function Footer() {
           이용약관
         </Link>
       </div>
+      <p className="mx-auto mt-3 text-center text-xs text-zinc-500">
+        Copyright © {new Date().getFullYear()} 개판 AI. All rights reserved.
+      </p>
     </footer>
   );
 }

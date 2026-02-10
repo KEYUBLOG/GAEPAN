@@ -1,12 +1,28 @@
 "use client";
 
-import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Logo } from "@/app/components/Logo";
-import { CoupangBanner } from "@/app/components/CoupangBanner";
-import { CoupangLinkBanner } from "@/app/components/CoupangLinkBanner";
 import { animate, motion } from "framer-motion";
+
+const CoupangBanner = dynamic(
+  () => import("@/app/components/CoupangBanner").then((m) => m.CoupangBanner),
+  { ssr: false, loading: () => <div className="h-16 w-full rounded-xl bg-zinc-900/50 animate-pulse" /> }
+);
+const CoupangLinkBanner = dynamic(
+  () => import("@/app/components/CoupangLinkBanner").then((m) => m.CoupangLinkBanner),
+  { ssr: false, loading: () => <div className="h-10 w-full rounded-lg bg-zinc-900/50 animate-pulse" /> }
+);
+const LiveCourtAside = dynamic(
+  () => import("@/app/components/LiveCourtSection").then((m) => m.LiveCourtAside),
+  { ssr: false, loading: () => <div className="hidden md:block h-64 rounded-xl bg-zinc-900/30 animate-pulse" /> }
+);
+const LiveCourtTicker = dynamic(
+  () => import("@/app/components/LiveCourtSection").then((m) => m.LiveCourtTicker),
+  { ssr: false, loading: () => <div className="h-14 bg-zinc-900/50" /> }
+);
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { maskCommentIp } from "@/lib/comment";
 import { useBlockedKeywords } from "@/lib/useBlockedKeywords";
@@ -326,15 +342,24 @@ function HomeContent() {
   type CourtLogEntry = CourtLogVote | CourtLogComment;
   const [courtLogs, setCourtLogs] = useState<CourtLogEntry[]>([]);
   const courtLogsRef = useRef<HTMLDivElement | null>(null);
+  const asideRef = useRef<HTMLDivElement | null>(null);
   const loggedVotes = useRef<Set<string>>(new Set()); // 중복 방지용: "post_id:ip_address" 형식
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
   const [isOperatorLoggedIn, setIsOperatorLoggedIn] = useState(false);
   const [isMobileLogOpen, setIsMobileLogOpen] = useState(false);
+  useEffect(() => {
+    if (!isMobileLogOpen) courtLogsRef.current = asideRef.current;
+  }, [isMobileLogOpen]);
+  useLayoutEffect(() => {
+    if (!isMobileLogOpen) courtLogsRef.current = asideRef.current;
+  });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [todayConfirmed, setTodayConfirmed] = useState<number | null>(null);
+  const [yesterdayConfirmed, setYesterdayConfirmed] = useState<number | null>(null);
   const [cumulativeConfirmed, setCumulativeConfirmed] = useState<number | null>(null);
   const [cumulativeStatsError, setCumulativeStatsError] = useState<string | null>(null);
+  const [deferredReady, setDeferredReady] = useState(false);
 
   const firstFieldRef = useRef<HTMLInputElement | null>(null);
   const postsListRef = useRef<HTMLElement | null>(null);
@@ -348,7 +373,121 @@ function HomeContent() {
   const [commentCountsByPostId, setCommentCountsByPostId] = useState<Record<string, number>>({});
   const [viewCountsByPostId, setViewCountsByPostId] = useState<Record<string, number>>({});
   const [scrollToCommentsOnOpen, setScrollToCommentsOnOpen] = useState(false);
+  const [scrollToCommentId, setScrollToCommentId] = useState<string | null>(null);
+  type NotificationItem = {
+    id: string;
+    type: string;
+    postId: string | null;
+    commentId: string | null;
+    actorDisplay: string | null;
+    payload: unknown;
+    createdAt: string;
+  };
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [hasNewNotification, setHasNewNotification] = useState(false);
+  const notificationDropdownRef = useRef<HTMLDivElement | null>(null);
+  const lastNotificationCountRef = useRef<number>(-1);
   const { mask: maskBlocked } = useBlockedKeywords();
+
+  // 알림 목록 로드 (배지용: 지연 로드 / 드롭다운 열 때 갱신) + 새 알림 도착 시 효과용
+  const fetchNotifications = React.useCallback((options?: { markSeen?: boolean }) => {
+    return fetch("/api/notifications")
+      .then((r) => r.json().catch(() => ({ notifications: [] })))
+      .then((data: { notifications?: NotificationItem[]; error?: string }) => {
+        if (data.error) return;
+        const list = data.notifications ?? [];
+        const prev = lastNotificationCountRef.current;
+        setNotifications(list);
+        if (options?.markSeen) {
+          lastNotificationCountRef.current = list.length;
+          setHasNewNotification(false);
+        } else if (prev >= 0 && list.length > prev) {
+          setHasNewNotification(true);
+        }
+        lastNotificationCountRef.current = list.length;
+      });
+  }, []);
+  useEffect(() => {
+    if (!deferredReady) return;
+    fetchNotifications();
+  }, [deferredReady, fetchNotifications]);
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    setNotificationsLoading(true);
+    fetchNotifications({ markSeen: true }).finally(() => setNotificationsLoading(false));
+  }, [notificationsOpen, fetchNotifications]);
+  // 탭 포커스 시 45초마다 알림 갱신 (새 알림 있으면 효과)
+  useEffect(() => {
+    if (!deferredReady) return;
+    const t = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        fetchNotifications();
+      }
+    }, 45000);
+    return () => clearInterval(t);
+  }, [deferredReady, fetchNotifications]);
+
+  // 알림 드롭다운 외부 클릭 시 닫기
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (notificationDropdownRef.current?.contains(e.target as Node)) return;
+      setNotificationsOpen(false);
+    };
+    document.addEventListener("click", onDocClick, true);
+    return () => document.removeEventListener("click", onDocClick, true);
+  }, [notificationsOpen]);
+
+  // 알림 클릭 시 해당 글 열고 댓글(또는 특정 댓글)로 이동
+  const openNotificationTarget = (postId: string, commentId: string | null) => {
+    setNotificationsOpen(false);
+    const found = recentPosts.find((p) => p.id === postId);
+    if (found) {
+      setSelectedPost(found);
+      if (commentId) setScrollToCommentId(commentId);
+      else setScrollToCommentsOnOpen(true);
+      return;
+    }
+    const supabase = getSupabaseBrowserClient();
+    supabase
+      .from("posts")
+      .select("*, verdict_rationale")
+      .eq("id", postId)
+      .maybeSingle()
+      .then(({ data: row, error }) => {
+        if (error || !row) return;
+        const post: PostPreview = {
+          id: String((row as any).id ?? ""),
+          title: ((row as any).title as string) ?? "",
+          plaintiff: ((row as any).plaintiff as string | null) ?? null,
+          defendant: ((row as any).defendant as string | null) ?? null,
+          content: ((row as any).content as string | null) ?? null,
+          verdict: ((row as any).verdict as string) ?? "",
+          verdict_rationale:
+            (typeof (row as any).verdict_rationale === "string"
+              ? (row as any).verdict_rationale
+              : typeof (row as any).verdictRationale === "string"
+                ? (row as any).verdictRationale
+                : "") ?? "",
+          ratio: toRatioNumber((row as any).ratio),
+          created_at: ((row as any).created_at as string | null) ?? null,
+          guilty: Number((row as any).guilty) || 0,
+          not_guilty: Number((row as any).not_guilty) || 0,
+          image_url: ((row as any).image_url as string | null) ?? null,
+          author_id: ((row as any).author_id as string | null) ?? null,
+          case_number: (row as any).case_number != null && Number.isFinite(Number((row as any).case_number)) ? Number((row as any).case_number) : null,
+          category: ((row as any).category as string | null) ?? null,
+          trial_type: ((row as any).trial_type === "DEFENSE" || (row as any).trial_type === "ACCUSATION") ? (row as any).trial_type : null,
+          voting_ended_at: ((row as any).voting_ended_at as string | null) ?? null,
+          ip_address: ((row as any).ip_address as string | null) ?? null,
+        };
+        setSelectedPost(post);
+        if (commentId) setScrollToCommentId(commentId);
+        else setScrollToCommentsOnOpen(true);
+      });
+  };
 
   // 사이트 전체: 우클릭·드래그·텍스트 선택(스크랩) 금지
   useEffect(() => {
@@ -363,115 +502,78 @@ function HomeContent() {
     };
   }, []);
 
-  // 오늘 확정된 사건 수 (실시간 사법 전광판 — 좌측)
+  // 실시간 사법 전광판: 오늘/어제/누적 한 번에 조회, 채널·폴링 1개로 통합
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
-    const loadTodayConfirmed = async () => {
+    const cols = "id, created_at, voting_ended_at";
+    const endedAt = (row: { created_at: string | null; voting_ended_at: string | null }) => {
+      if (row.voting_ended_at) return new Date(row.voting_ended_at).getTime();
+      const created = row.created_at ? new Date(row.created_at).getTime() : 0;
+      return created + TRIAL_DURATION_MS;
+    };
+
+    const loadAllBoardStats = async () => {
+      const now = new Date();
+      const startOfToday = new Date(now);
+      startOfToday.setHours(0, 0, 0, 0);
+      const endOfToday = new Date(startOfToday);
+      endOfToday.setDate(endOfToday.getDate() + 1);
+      const startOfYesterday = new Date(startOfToday);
+      startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+      const fromDate = new Date(startOfToday);
+      fromDate.setDate(fromDate.getDate() - 3);
+
       try {
-        const now = new Date();
-        const startOfToday = new Date(now);
-        startOfToday.setHours(0, 0, 0, 0);
-        const endOfToday = new Date(startOfToday);
-        endOfToday.setDate(endOfToday.getDate() + 1);
-        const fromDate = new Date(startOfToday);
-        fromDate.setDate(fromDate.getDate() - 2);
+        const [recentRes, cumulativeRes] = await Promise.all([
+          supabase
+            .from("posts")
+            .select(cols)
+            .neq("status", "판결불가")
+            .gte("created_at", fromDate.toISOString()),
+          supabase
+            .from("posts")
+            .select(cols)
+            .neq("status", "판결불가")
+            .limit(10000),
+        ]);
 
-        const { data, error } = await supabase
-          .from("posts")
-          .select("id, created_at, voting_ended_at")
-          .neq("status", "판결불가")
-          .gte("created_at", fromDate.toISOString());
-
-        if (error) throw error;
-
-        const rows = (data ?? []) as Array<{ created_at: string | null; voting_ended_at: string | null }>;
-        const endedAt = (row: (typeof rows)[0]) => {
-          if (row.voting_ended_at) return new Date(row.voting_ended_at).getTime();
-          const created = row.created_at ? new Date(row.created_at).getTime() : 0;
-          return created + TRIAL_DURATION_MS;
-        };
-        const todayCompleted = rows.filter((row) => {
-          if (isVotingOpen(row.created_at ?? null, row.voting_ended_at ?? null)) return false;
+        if (recentRes.error) throw recentRes.error;
+        const recentRows = (recentRes.data ?? []) as Array<{ created_at: string | null; voting_ended_at: string | null }>;
+        let today = 0;
+        let yesterday = 0;
+        for (const row of recentRows) {
+          if (isVotingOpen(row.created_at ?? null, row.voting_ended_at ?? null)) continue;
           const t = endedAt(row);
-          return t >= startOfToday.getTime() && t < endOfToday.getTime();
-        });
-        setTodayConfirmed(todayCompleted.length);
-      } catch {
-        setTodayConfirmed(null);
-      }
-    };
-    loadTodayConfirmed();
-    const channel = supabase
-      .channel("today-confirmed-realtime")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "posts" }, () => loadTodayConfirmed())
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "posts" }, () => loadTodayConfirmed())
-      .subscribe(() => {});
-    const t = setInterval(loadTodayConfirmed, 30_000);
-    return () => {
-      supabase.removeChannel(channel);
-      clearInterval(t);
-    };
-  }, []);
+          if (t >= startOfToday.getTime() && t < endOfToday.getTime()) today++;
+          else if (t >= startOfYesterday.getTime() && t < startOfToday.getTime()) yesterday++;
+        }
+        setTodayConfirmed(today);
+        setYesterdayConfirmed(yesterday);
 
-  // 누적 확정된 사건 수 (실시간 사법 전광판 — 우측)
-  useEffect(() => {
-    const supabase = getSupabaseBrowserClient();
-
-    const loadCumulativeConfirmed = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("posts")
-          .select("id, created_at, voting_ended_at")
-          .neq("status", "판결불가")
-          .limit(10000);
-
-        if (error) throw error;
-
-        const rows = (data ?? []) as Array<{
-          id: string;
-          created_at: string | null;
-          voting_ended_at: string | null;
-        }>;
-
-        const count = rows.filter((row) =>
+        if (cumulativeRes.error) throw cumulativeRes.error;
+        const cumRows = (cumulativeRes.data ?? []) as Array<{ created_at: string | null; voting_ended_at: string | null }>;
+        const cumulative = cumRows.filter((row) =>
           !isVotingOpen(row.created_at ?? null, row.voting_ended_at ?? null),
         ).length;
-
-        setCumulativeConfirmed(count);
+        setCumulativeConfirmed(cumulative);
         setCumulativeStatsError(null);
       } catch (err) {
-        const msg =
-          err instanceof Error
-            ? err.message
-            : (err && typeof err === "object" && "message" in (err as object)
-              ? String((err as { message?: unknown }).message)
-              : JSON.stringify(err));
-        console.error("[GAEPAN] 누적 확정 사건 집계 오류:", msg, err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[GAEPAN] 전광판 집계 오류:", msg);
         setCumulativeStatsError("누적 확정 사건을 불러오지 못했습니다.");
       }
     };
 
-    loadCumulativeConfirmed();
-
+    loadAllBoardStats();
     const channel = supabase
-      .channel("cumulative-stats-realtime")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "posts" },
-        () => { loadCumulativeConfirmed(); },
-      )
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "posts" },
-        () => { loadCumulativeConfirmed(); },
-      )
+      .channel("board-stats-realtime")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "posts" }, loadAllBoardStats)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "posts" }, loadAllBoardStats)
       .subscribe(() => {});
-
-    const interval = setInterval(loadCumulativeConfirmed, 30_000);
-
+    const t = setInterval(loadAllBoardStats, 30_000);
     return () => {
       supabase.removeChannel(channel);
-      clearInterval(interval);
+      clearInterval(t);
     };
   }, []);
 
@@ -535,15 +637,22 @@ function HomeContent() {
       });
   }, [searchParams]);
 
-  // 운영자 로그인 상태 확인
+  // 비필수 요청 지연: 첫 페인트 후 실행
   useEffect(() => {
+    const t = setTimeout(() => setDeferredReady(true), 1200);
+    return () => clearTimeout(t);
+  }, []);
+
+  // 운영자 로그인 상태 확인 (지연 실행)
+  useEffect(() => {
+    if (!deferredReady) return;
     fetch("/api/admin/check")
       .then((r) => safeJsonFromResponse<{ loggedIn?: boolean }>(r))
       .then((data) => {
         setIsOperatorLoggedIn(data.loggedIn === true);
       })
       .catch(() => setIsOperatorLoggedIn(false));
-  }, []);
+  }, [deferredReady]);
 
   const closeAccuse = () => {
     setIsReviewing(false);
@@ -715,8 +824,9 @@ function HomeContent() {
     return () => clearInterval(t);
   }, [recentPosts]);
 
-  // 실시간 재판소: vote_events 구독
+  // 실시간 재판소: vote_events 구독 (지연 실행으로 초기 로딩 완화)
   useEffect(() => {
+    if (!deferredReady) return;
     const supabase = getSupabaseBrowserClient();
     supabase
       .from("vote_events")
@@ -763,10 +873,11 @@ function HomeContent() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [recentPosts]);
+  }, [deferredReady, recentPosts]);
 
-  // 실시간 재판소: votes 구독 (법정 기록 로그 창용)
+  // 실시간 재판소: votes 구독 (법정 기록 로그 창용, 지연 실행)
   useEffect(() => {
+    if (!deferredReady) return;
     const supabase = getSupabaseBrowserClient();
     
     // 초기 데이터 로드 (최근 50개) — 진행 중/확정 구분 없이 최근 기록 표시
@@ -914,7 +1025,7 @@ function HomeContent() {
       supabase.removeChannel(channel);
       supabase.removeChannel(commentsChannel);
     };
-  }, [recentPosts]);
+  }, [deferredReady, recentPosts]);
 
   // courtLogs가 업데이트될 때마다 자동 스크롤 (최신 기록이 위에 오도록 상단으로)
   useEffect(() => {
@@ -1166,7 +1277,7 @@ function HomeContent() {
       }
 
       if ("status" in data && data.status === "판결불가") {
-        const msg = (data as { message?: string }).message ?? "판결할 수 없습니다. 본문에서 검사와 피고인을 명확히 구분해 주세요.";
+        const msg = (data as { message?: string }).message ?? "판결할 수 없습니다.";
         setJudgeError(msg);
         console.warn("[GAEPAN][Accuse] 판결불가 응답", data);
         return;
@@ -1603,41 +1714,35 @@ function HomeContent() {
     return Array.from(ids);
   }, [filteredTopGuiltyPost?.id, ongoingPosts, completedPostsSorted, weeklyWinners]);
 
+  const [debouncedCountIds, setDebouncedCountIds] = useState("");
   useEffect(() => {
-    if (visiblePostIdsForCommentCount.length === 0) {
-      setCommentCountsByPostId({});
-      return;
-    }
-    let cancelled = false;
-    fetch(`/api/posts/comment-counts?ids=${visiblePostIdsForCommentCount.join(",")}`)
-      .then((r) => r.json().catch(() => ({ counts: {} })))
-      .then((data: { counts?: Record<string, number>; error?: string }) => {
-        if (cancelled) return;
-        setCommentCountsByPostId(data.counts ?? {});
-      })
-      .catch(() => {
-        if (!cancelled) setCommentCountsByPostId({});
-      });
-    return () => { cancelled = true; };
+    const raw = visiblePostIdsForCommentCount.join(",");
+    const t = setTimeout(() => setDebouncedCountIds(raw), 400);
+    return () => clearTimeout(t);
   }, [visiblePostIdsForCommentCount.join(",")]);
 
   useEffect(() => {
-    if (visiblePostIdsForCommentCount.length === 0) {
+    if (!debouncedCountIds) {
+      setCommentCountsByPostId({});
       setViewCountsByPostId({});
       return;
     }
     let cancelled = false;
-    fetch(`/api/posts/view-counts?ids=${visiblePostIdsForCommentCount.join(",")}`)
-      .then((r) => r.json().catch(() => ({ counts: {} })))
-      .then((data: { counts?: Record<string, number>; error?: string }) => {
-        if (cancelled) return;
-        setViewCountsByPostId(data.counts ?? {});
-      })
-      .catch(() => {
-        if (!cancelled) setViewCountsByPostId({});
-      });
+    Promise.all([
+      fetch(`/api/posts/comment-counts?ids=${debouncedCountIds}`).then((r) => r.json().catch(() => ({ counts: {} }))),
+      fetch(`/api/posts/view-counts?ids=${debouncedCountIds}`).then((r) => r.json().catch(() => ({ counts: {} }))),
+    ]).then(([commentData, viewData]) => {
+      if (cancelled) return;
+      setCommentCountsByPostId((commentData as { counts?: Record<string, number> }).counts ?? {});
+      setViewCountsByPostId((viewData as { counts?: Record<string, number> }).counts ?? {});
+    }).catch(() => {
+      if (!cancelled) {
+        setCommentCountsByPostId({});
+        setViewCountsByPostId({});
+      }
+    });
     return () => { cancelled = true; };
-  }, [visiblePostIdsForCommentCount.join(",")]);
+  }, [debouncedCountIds]);
 
   // 게시글 상세(모달) 열릴 때 조회 기록 (IP당 1회, 기존 글 포함) 후 조회수 갱신
   useEffect(() => {
@@ -1656,15 +1761,22 @@ function HomeContent() {
       .catch(() => {});
   }, [selectedPost?.id]);
 
-  // 카드에서 댓글 클릭으로 모달 열었을 때 댓글 섹션으로 스크롤
+  // 카드에서 댓글 클릭 / 알림 클릭으로 모달 열었을 때 댓글(또는 특정 댓글)로 스크롤
   useEffect(() => {
-    if (!selectedPost || !scrollToCommentsOnOpen) return;
+    if (!selectedPost || (!scrollToCommentsOnOpen && !scrollToCommentId)) return;
+    const delay = scrollToCommentId ? 900 : 300;
     const t = setTimeout(() => {
-      commentsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (scrollToCommentId) {
+        const el = document.getElementById(`comment-${scrollToCommentId}`);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+        setScrollToCommentId(null);
+      } else {
+        commentsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
       setScrollToCommentsOnOpen(false);
-    }, 300);
+    }, delay);
     return () => clearTimeout(t);
-  }, [selectedPost?.id, scrollToCommentsOnOpen]);
+  }, [selectedPost?.id, scrollToCommentsOnOpen, scrollToCommentId]);
 
   // 삭제 비밀번호 모달 열릴 때 입력창 포커스
   useEffect(() => {
@@ -1904,16 +2016,82 @@ function HomeContent() {
       {/* GNB (상단바) */}
       <nav className="px-4 py-3 md:py-6 md:px-16 border-b border-zinc-900 flex justify-between items-center sticky top-0 bg-zinc-950/80 backdrop-blur-md z-50">
         <Logo className="pr-2" />
-        
-        {/* 우측 상단 메뉴 버튼 (모바일/PC 공통) */}
-        <button
-          type="button"
-          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          className="text-zinc-400 hover:text-amber-500 transition p-2"
-          aria-label="메뉴"
-        >
-          <span className="text-2xl font-bold">≡</span>
-        </button>
+
+        <div ref={notificationDropdownRef} className="flex items-center gap-0 relative">
+          {/* 알림 버튼 (막대기 세개 버튼 좌측) — 새 알림 시 펄스 효과 */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setNotificationsOpen((o) => !o);
+              if (!notificationsOpen) setHasNewNotification(false);
+            }}
+            className={`relative text-zinc-400 hover:text-amber-500 transition p-2 rounded-lg ${hasNewNotification ? "animate-pulse" : ""}`}
+            aria-label="알림"
+            aria-expanded={notificationsOpen}
+          >
+            <span className={`inline-block text-xl transition-transform ${hasNewNotification ? "scale-110" : ""}`} title="알림">🔔</span>
+            {notifications.length > 0 ? (
+              <span className={`absolute top-0.5 right-0.5 min-w-[16px] h-4 rounded-full bg-amber-500 text-zinc-950 text-[10px] font-bold flex items-center justify-center px-1 ${hasNewNotification ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-zinc-950 animate-pulse" : ""}`}>
+                {notifications.length > 99 ? "99+" : notifications.length}
+              </span>
+            ) : null}
+          </button>
+          {notificationsOpen ? (
+            <div className="absolute top-full right-0 mt-1 w-[min(320px,90vw)] max-h-[70vh] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950 shadow-xl z-[60]">
+              <div className="p-3 border-b border-zinc-800 flex items-center justify-between sticky top-0 bg-zinc-950">
+                <span className="text-sm font-bold text-amber-500">알림</span>
+                <button type="button" onClick={() => setNotificationsOpen(false)} className="text-zinc-500 hover:text-zinc-300 text-lg leading-none" aria-label="닫기">×</button>
+              </div>
+              {notificationsLoading ? (
+                <div className="p-6 text-center text-zinc-500 text-sm">불러오는 중…</div>
+              ) : notifications.length === 0 ? (
+                <div className="p-6 text-center text-zinc-500 text-sm">알림이 없습니다.</div>
+              ) : (
+                <ul className="divide-y divide-zinc-800">
+                  {notifications.map((n) => {
+                    const label =
+                      n.type === "comment_on_post"
+                        ? `${n.actorDisplay ?? "누군가"}이(가) 내 글에 댓글을 남겼습니다.`
+                        : n.type === "reply_on_comment"
+                          ? `${n.actorDisplay ?? "누군가"}이(가) 내 댓글에 대댓글을 남겼습니다.`
+                          : n.type === "like_on_comment"
+                            ? `${n.actorDisplay ?? "누군가"}이(가) 내 댓글에 발도장을 눌렀습니다.`
+                            : n.type === "vote_on_post"
+                              ? `${n.actorDisplay ?? "누군가"}이(가) 유/무죄 투표를 했습니다.`
+                              : "새 알림";
+                    const postId = n.postId ?? "";
+                    const commentId = n.commentId ?? null;
+                    return (
+                      <li key={n.id}>
+                        <button
+                          type="button"
+                          className="w-full text-left px-4 py-3 hover:bg-zinc-800/80 transition text-sm text-zinc-200"
+                          onClick={() => postId && openNotificationTarget(postId, commentId)}
+                        >
+                          <span className="block font-medium">{label}</span>
+                          {(n.payload as { post_title?: string } | null)?.post_title ? (
+                            <span className="block text-zinc-500 truncate mt-0.5">{(n.payload as { post_title: string }).post_title}</span>
+                          ) : null}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          ) : null}
+
+          {/* 우측 상단 메뉴 버튼 (막대기 세개, 모바일/PC 공통) */}
+          <button
+            type="button"
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            className="text-zinc-400 hover:text-amber-500 transition p-2"
+            aria-label="메뉴"
+          >
+            <span className="text-2xl font-bold">≡</span>
+          </button>
+        </div>
       </nav>
 
       {/* 메뉴 드로어 (모바일/PC 공통) */}
@@ -2023,16 +2201,22 @@ function HomeContent() {
           {cumulativeStatsError ? (
             <p className="text-[11px] text-red-400 text-center">{cumulativeStatsError}</p>
           ) : (
-            <div className="flex flex-row items-stretch justify-center gap-6 md:gap-12">
+            <div className="flex flex-row items-stretch justify-center gap-4 md:gap-6">
               <div className="flex flex-col items-center justify-center text-center flex-1 min-w-0">
                 <span className="text-[11px] text-zinc-500 mb-1">오늘 확정된 사건</span>
                 <div className="text-xl md:text-2xl font-black text-zinc-200">
                   <AnimatedNumber value={todayConfirmed ?? 0} />
                 </div>
               </div>
-              <div className="flex flex-col items-center justify-center text-center flex-1 min-w-0 border-l border-zinc-700 pl-6 md:pl-12">
+              <div className="flex flex-col items-center justify-center text-center flex-1 min-w-0 border-l border-zinc-700 pl-4 md:pl-6">
+                <span className="text-[11px] text-zinc-500 mb-1">어제 확정된 사건</span>
+                <div className="text-xl md:text-2xl font-black text-zinc-300">
+                  <AnimatedNumber value={yesterdayConfirmed ?? 0} />
+                </div>
+              </div>
+              <div className="flex flex-col items-center justify-center text-center flex-1 min-w-0 border-l border-zinc-700 pl-4 md:pl-6">
                 <span className="text-[11px] text-amber-400/90 mb-1 font-semibold">누적 확정된 사건</span>
-                <div className="text-2xl md:text-3xl font-black text-amber-400">
+                <div className="text-xl md:text-2xl font-black text-amber-400">
                   <AnimatedNumber value={cumulativeConfirmed ?? 0} />
                 </div>
               </div>
@@ -2055,7 +2239,7 @@ function HomeContent() {
                 누가 <span className="text-amber-500 underline decoration-zinc-800">죄인</span>인가?
               </h2>
               <p className="text-zinc-500 text-base sm:text-lg md:text-2xl mb-8 md:mb-12 font-medium leading-relaxed md:leading-relaxed px-4 text-center">
-                당신의 억울한 사연, <br className="hidden md:block" /> 
+                당신의 억울한 사연, <br className="md:hidden" /> 
                 AI 판사가 논리적으로 뼈를 때려드립니다.
               </p>
               
@@ -2441,9 +2625,6 @@ function HomeContent() {
                           </span>
                         )}
                       </div>
-                      <div className="mt-2 text-lg md:text-xl font-black tracking-tight">
-                        최종 선고
-                      </div>
                     </div>
                     <button
                       type="button"
@@ -2500,37 +2681,32 @@ function HomeContent() {
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs font-black tracking-widest uppercase text-zinc-400">
-                          과실 비율
-                        </div>
-                        <div className="text-xs font-black text-zinc-300">
-                          검사 {judgeResult.verdict.ratio.plaintiff}% / 피고인{" "}
-                          {judgeResult.verdict.ratio.defendant}%
-                        </div>
+                    <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4">
+                      <div className="text-xs font-black tracking-widest uppercase text-amber-200">
+                        AI 최종 선고
                       </div>
-                      <div className="mt-3 w-full bg-zinc-800 h-3 rounded-full overflow-hidden flex">
-                        <div
-                          className="bg-amber-500 h-full shadow-[0_0_15px_rgba(245,158,11,0.35)]"
-                          style={{ width: `${judgeResult.verdict.ratio.plaintiff}%` }}
-                        />
-                        <div
-                          className="bg-zinc-600 h-full"
-                          style={{ width: `${judgeResult.verdict.ratio.defendant}%` }}
-                        />
-                      </div>
-                      <div className="mt-3 text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">
-                        {judgeResult.verdict.ratio.rationale}
+                      <div className="mt-2 text-sm md:text-base font-bold leading-relaxed">
+                        {(() => {
+                          const def = Number(judgeResult.verdict.ratio?.defendant) ?? 50;
+                          if (def === 50) {
+                            return <span className="text-amber-200">판결 유보 : 판단 불가</span>;
+                          }
+                          const isGuilty = def > 50;
+                          return (
+                            <span className={isGuilty ? "text-red-300" : "text-blue-300"}>
+                              피고인 {isGuilty ? "유죄" : "무죄"}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4">
-                      <div className="text-xs font-black tracking-widest uppercase text-amber-200">
-                        최종 선고
+                    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+                      <div className="text-xs font-black tracking-widest uppercase text-zinc-400">
+                        AI 상세 판결
                       </div>
-                      <div className="mt-2 text-sm md:text-base font-bold text-amber-50 leading-relaxed whitespace-pre-wrap">
-                        {judgeResult.verdict.verdict}
+                      <div className="mt-2 text-sm md:text-base text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                        {judgeResult.verdict.ratio.rationale}
                       </div>
                     </div>
                   </div>
@@ -3223,7 +3399,7 @@ function HomeContent() {
             <section ref={hallOfFameRef} className="py-12 md:py-16 scroll-mt-32 border-t border-zinc-900 mt-8 md:mt-12">
               <div className="mb-8 md:mb-10">
                 <h3 className="text-2xl sm:text-3xl md:text-4xl font-black mb-2">🏆 명예의 전당</h3>
-                <p className="text-zinc-500 text-xs sm:text-sm">매주 &apos;오늘의 개판&apos; 1위로 선정된 사건입니다.</p>
+                <p className="text-zinc-500 text-xs sm:text-sm">매주 투표수 1위를 기록한 사건입니다.</p>
               </div>
               <div className="bg-zinc-900 border border-zinc-800 rounded-[2rem] p-4 md:p-6 lg:p-8">
                 {weeklyWinners.length === 0 ? (
@@ -3340,220 +3516,30 @@ function HomeContent() {
             </section>
           </div>
 
-          {/* 실시간 재판소: PC에서도 하단 티커로만 표시 (사이드바 비표시) */}
-          <aside className="hidden md:col-span-4 md:pl-6 md:pr-0">
-            {/* 실시간 재판소 — 법정 기록 로그 창 */}
-            <section className="sticky top-24 pt-4 md:pt-6 pb-8 flex flex-col h-[calc(100vh-120px)]">
-              <div className="flex justify-between items-end mb-4">
-                <div>
-                  <h3 className="text-lg md:text-xl font-black mb-1">실시간 재판소</h3>
-                  <p className="text-zinc-500 text-[11px] sm:text-[13px]">정의는 멈추지 않는다, 지금 이 순간의 판결</p>
-                </div>
-                <div className="flex items-center gap-2 text-amber-500 font-bold text-xs">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                  </span>
-                  LIVE
-                </div>
-              </div>
-
-              <div 
-                ref={courtLogsRef}
-                className="bg-zinc-900/50 backdrop-blur border-l-4 border-amber-500/30 rounded-xl p-4 flex-1 overflow-y-auto shadow-[0_0_20px_rgba(245,158,11,0.15)]"
-                style={{
-                  boxShadow: "0 0 20px rgba(245,158,11,0.15), inset 0 0 20px rgba(0,0,0,0.3)",
-                }}
-              >
-                <div className="text-[10px] text-zinc-500/70 mb-3 font-mono uppercase tracking-wider">
-                  실시간 법정 기록 (Live Court Minutes)
-                </div>
-                {courtLogs.length === 0 ? (
-                  <p className="text-zinc-500 text-center py-8 text-xs sm:text-sm">아직 판결 기록이 없습니다.</p>
-                ) : (
-                  <ul className="space-y-2 font-mono text-xs">
-                    {courtLogs.map((log) => {
-                      const date = new Date(log.created_at);
-                      const dateStr = date.toLocaleDateString("ko-KR", {
-                        year: "2-digit",
-                        month: "2-digit",
-                        day: "2-digit",
-                      });
-                      const timeStr = date.toLocaleTimeString("ko-KR", { 
-                        hour: "2-digit", 
-                        minute: "2-digit", 
-                        second: "2-digit",
-                        hour12: false, 
-                      });
-                      const isVote = log.kind === "vote";
-                      const isGuilty = isVote && log.vote_type === "guilty";
-                      return (
-                        <li 
-                          key={log.id}
-                          onClick={() => {
-                            const post = recentPosts.find((p) => p.id === log.post_id);
-                            if (post) setSelectedPost(post);
-                          }}
-                          className="text-zinc-300 py-1.5 px-2 rounded border-l-2 border-amber-500/20 bg-black/10 hover:bg-black/20 transition-all duration-300 cursor-pointer"
-                          style={{
-                            animation: "slideUp 0.3s ease-out",
-                          }}
-                        >
-                          <span className="text-zinc-500 text-[10px] mr-2">[{dateStr} {timeStr}]</span>
-                          <span className="text-zinc-500">{log.nickname}님이</span>
-                          {log.post_title ? (
-                            <>
-                              <span className="text-amber-400 font-semibold mx-1">'{log.post_title.length > 25 ? `${log.post_title.slice(0, 25)}…` : log.post_title}'</span>
-                              <span className="text-zinc-500">{isVote ? "사건의 판결문에 날인했습니다." : "사건에 배심원 한마디를 남겼습니다."}</span>
-                            </>
-                          ) : (
-                            <span className="text-zinc-500 mx-1">{isVote ? "사건의 판결문에 날인했습니다." : "사건에 배심원 한마디를 남겼습니다."}</span>
-                          )}
-                          {isVote ? (
-                            <span className={`font-bold ml-1.5 ${isGuilty ? "text-red-600" : "text-blue-600"}`}>
-                              ({isGuilty ? "유죄" : "무죄"})
-                            </span>
-                          ) : null}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            </section>
-          </aside>
-        </div>
-      </div>
-
-      {/* 실시간 재판소 하단 티커 (모바일·PC 공통) */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 border-t-4 border-amber-500/30 bg-zinc-900/95 backdrop-blur">
-        <button
-          type="button"
-          onClick={() => setIsMobileLogOpen(true)}
-          className="w-full px-4 py-3 flex items-center justify-between text-left"
-        >
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <span className="relative flex h-2 w-2 shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-            </span>
-            <span className="text-xs font-bold text-amber-400 shrink-0">실시간 재판소</span>
-            {courtLogs.length > 0 && courtLogs[0] ? (
-              <span className="text-xs text-zinc-400 truncate ml-2">
-                {courtLogs[0].kind === "vote"
-                  ? `${courtLogs[0].nickname}님이 ${courtLogs[0].post_title ? `'${courtLogs[0].post_title.length > 20 ? `${courtLogs[0].post_title.slice(0, 20)}…` : courtLogs[0].post_title}'` : "사건"}에 ${courtLogs[0].vote_type === "guilty" ? "유죄" : "무죄"} 판결`
-                  : `${courtLogs[0].nickname}님이 ${courtLogs[0].post_title ? `'${courtLogs[0].post_title.length > 20 ? `${courtLogs[0].post_title.slice(0, 20)}…` : courtLogs[0].post_title}'` : "사건"}에 배심원 한마디를 남겼습니다.`}
-              </span>
-            ) : (
-              <span className="text-xs text-zinc-500 ml-2">아직 판결 기록이 없습니다.</span>
-            )}
-          </div>
-          <span className="text-amber-500 text-xs shrink-0 ml-2">↑</span>
-        </button>
-      </div>
-
-      {/* 실시간 재판소 Slide-up 레이어 (모바일·PC 공통) */}
-      {isMobileLogOpen ? (
-        <div className="fixed inset-0 z-[200] flex flex-col">
-          {/* 배경 오버레이 */}
-          <button
-            type="button"
-            onClick={() => setIsMobileLogOpen(false)}
-            className="absolute inset-0 bg-black/70"
-            aria-label="닫기"
+          {/* 실시간 재판소 (코드 분할) */}
+          <LiveCourtAside
+            courtLogs={courtLogs}
+            recentPosts={recentPosts.map((p) => ({ id: p.id, title: p.title }))}
+            scrollRef={asideRef}
+            onSelectPost={(p) => {
+              const full = recentPosts.find((x) => x.id === p.id);
+              if (full) setSelectedPost(full);
+            }}
           />
-          {/* Slide-up 패널 */}
-          <div className="absolute bottom-0 left-0 right-0 bg-zinc-900/95 backdrop-blur border-t-4 border-amber-500/30 rounded-t-2xl shadow-[0_-10px_40px_rgba(0,0,0,0.5)] max-h-[80vh] flex flex-col animate-slide-up">
-            {/* 헤더 */}
-            <div className="flex items-center justify-between p-4 border-b border-zinc-800">
-              <div>
-                <h3 className="text-lg font-black mb-1">실시간 재판소</h3>
-                <p className="text-zinc-500 text-[11px]">정의는 멈추지 않는다, 지금 이 순간의 판결</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 text-amber-500 font-bold text-xs">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                  </span>
-                  LIVE
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsMobileLogOpen(false)}
-                  className="text-zinc-400 hover:text-zinc-200 text-xl font-bold"
-                  aria-label="닫기"
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-            {/* 로그 내용 */}
-            <div 
-              ref={courtLogsRef}
-              className="flex-1 overflow-y-auto p-4"
-            >
-              <div className="text-[10px] text-zinc-500/70 mb-3 font-mono uppercase tracking-wider">
-                실시간 법정 기록 (Live Court Minutes)
-              </div>
-              {courtLogs.length === 0 ? (
-                <p className="text-zinc-500 text-center py-8 text-xs sm:text-sm">아직 판결 기록이 없습니다.</p>
-              ) : (
-                <ul className="space-y-2 font-mono text-xs">
-                  {courtLogs.map((log) => {
-                    const date = new Date(log.created_at);
-                    const dateStr = date.toLocaleDateString("ko-KR", {
-                      year: "2-digit",
-                      month: "2-digit",
-                      day: "2-digit",
-                    });
-                    const timeStr = date.toLocaleTimeString("ko-KR", { 
-                      hour: "2-digit", 
-                      minute: "2-digit", 
-                      second: "2-digit",
-                      hour12: false, 
-                    });
-                    const isVote = log.kind === "vote";
-                    const isGuilty = isVote && log.vote_type === "guilty";
-                    return (
-                      <li 
-                        key={log.id}
-                        onClick={() => {
-                          const post = recentPosts.find((p) => p.id === log.post_id);
-                          if (post) {
-                            setSelectedPost(post);
-                            setIsMobileLogOpen(false);
-                          }
-                        }}
-                        className="text-zinc-300 py-1.5 px-2 rounded border-l-2 border-amber-500/20 bg-black/10 hover:bg-black/20 transition-all duration-300 cursor-pointer"
-                        style={{
-                          animation: "slideUp 0.3s ease-out",
-                        }}
-                      >
-                        <span className="text-zinc-500 text-[10px] mr-2">[{dateStr} {timeStr}]</span>
-                        <span className="text-zinc-500">{log.nickname}님이</span>
-                        {log.post_title ? (
-                          <>
-                            <span className="text-amber-400 font-semibold mx-1">'{log.post_title.length > 25 ? `${log.post_title.slice(0, 25)}…` : log.post_title}'</span>
-                            <span className="text-zinc-500">{isVote ? "사건의 판결문에 날인했습니다." : "사건에 배심원 한마디를 남겼습니다."}</span>
-                          </>
-                        ) : (
-                          <span className="text-zinc-500 mx-1">{isVote ? "사건의 판결문에 날인했습니다." : "사건에 배심원 한마디를 남겼습니다."}</span>
-                        )}
-                        {isVote ? (
-                          <span className={`font-bold ml-1.5 ${isGuilty ? "text-red-600" : "text-blue-600"}`}>
-                            ({isGuilty ? "유죄" : "무죄"})
-                          </span>
-                        ) : null}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </div>
         </div>
-      ) : null}
+      </div>
+
+      <LiveCourtTicker
+        courtLogs={courtLogs}
+        recentPosts={recentPosts.map((p) => ({ id: p.id, title: p.title }))}
+        scrollRef={courtLogsRef}
+        onSelectPost={(p) => {
+          const full = recentPosts.find((x) => x.id === p.id);
+          if (full) setSelectedPost(full);
+        }}
+        isMobileLogOpen={isMobileLogOpen}
+        onMobileLogOpenChange={setIsMobileLogOpen}
+      />
 
       {/* 최근 판결문 상세 모달 */}
       {selectedPost ? (
@@ -4512,12 +4498,10 @@ function HomeContent() {
                             </span>
                             <div className="pl-2 min-w-0">
                               <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                                {!isReplyOperator ? (
-                                  <span className="font-bold shrink-0 whitespace-nowrap text-amber-500/80 text-[10px] sm:text-[11px]">
-                                    {jurorLabels[getCommentLabelKey(reply)] ?? "배심원"}
-                                    {!isReplyOperator && maskCommentIp(reply.ip_address) ? ` (${maskCommentIp(reply.ip_address)})` : ""}
-                                  </span>
-                                ) : null}
+                                <span className={`font-bold shrink-0 whitespace-nowrap text-[10px] sm:text-[11px] ${isReplyOperator ? "text-amber-400" : "text-amber-500/80"}`}>
+                                  {jurorLabels[getCommentLabelKey(reply)] ?? "배심원"}
+                                  {!isReplyOperator && maskCommentIp(reply.ip_address) ? ` (${maskCommentIp(reply.ip_address)})` : ""}
+                                </span>
                                 {isReplyOperator ? (
                                   <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/30 px-1.5 py-0.5 text-[9px] font-black text-amber-200 border border-amber-500/50 whitespace-nowrap">
                                     ⚖️ 대법관

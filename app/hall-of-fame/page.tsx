@@ -829,7 +829,7 @@ function HallOfFameContent() {
       }
 
       if ("status" in data && data.status === "판결불가") {
-        const msg = (data as { message?: string }).message ?? "판결할 수 없습니다. 본문에서 검사와 피고인을 명확히 구분해 주세요.";
+        const msg = (data as { message?: string }).message ?? "판결할 수 없습니다.";
         setJudgeError(msg);
         return;
       }
@@ -868,7 +868,7 @@ function HallOfFameContent() {
             명예의 전당
           </h1>
           <p className="text-amber-400/80 text-sm md:text-base font-medium">
-            매주 &apos;오늘의 개판&apos; 1위로 선정된 공식 판결 기록입니다.
+            매주 투표수 1위를 기록한 사건입니다.
           </p>
         </div>
 
@@ -2371,9 +2371,6 @@ function HallOfFameContent() {
                           </span>
                         )}
                       </div>
-                      <div className="mt-2 text-lg md:text-xl font-black tracking-tight">
-                        최종 선고
-                      </div>
                     </div>
                     <button
                       type="button"
@@ -2397,37 +2394,32 @@ function HallOfFameContent() {
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs font-black tracking-widest uppercase text-zinc-400">
-                          과실 비율
-                        </div>
-                        <div className="text-xs font-black text-zinc-300">
-                          검사 {judgeResult.verdict.ratio.plaintiff}% / 피고인{" "}
-                          {judgeResult.verdict.ratio.defendant}%
-                        </div>
+                    <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4">
+                      <div className="text-xs font-black tracking-widest uppercase text-amber-200">
+                        AI 최종 선고
                       </div>
-                      <div className="mt-3 w-full bg-zinc-800 h-3 rounded-full overflow-hidden flex">
-                        <div
-                          className="bg-amber-500 h-full shadow-[0_0_15px_rgba(245,158,11,0.35)]"
-                          style={{ width: `${judgeResult.verdict.ratio.plaintiff}%` }}
-                        />
-                        <div
-                          className="bg-zinc-600 h-full"
-                          style={{ width: `${judgeResult.verdict.ratio.defendant}%` }}
-                        />
-                      </div>
-                      <div className="mt-3 text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">
-                        {judgeResult.verdict.ratio.rationale}
+                      <div className="mt-2 text-sm md:text-base font-bold leading-relaxed">
+                        {(() => {
+                          const def = Number(judgeResult.verdict.ratio?.defendant) ?? 50;
+                          if (def === 50) {
+                            return <span className="text-amber-200">판결 유보 : 판단 불가</span>;
+                          }
+                          const isGuilty = def > 50;
+                          return (
+                            <span className={isGuilty ? "text-red-300" : "text-blue-300"}>
+                              피고인 {isGuilty ? "유죄" : "무죄"}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4">
-                      <div className="text-xs font-black tracking-widest uppercase text-amber-200">
-                        최종 선고
+                    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+                      <div className="text-xs font-black tracking-widest uppercase text-zinc-400">
+                        AI 상세 판결
                       </div>
-                      <div className="mt-2 text-sm md:text-base font-bold text-amber-50 leading-relaxed whitespace-pre-wrap">
-                        {judgeResult.verdict.verdict}
+                      <div className="mt-2 text-sm md:text-base text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                        {judgeResult.verdict.ratio.rationale}
                       </div>
                     </div>
                   </div>
