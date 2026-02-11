@@ -168,7 +168,7 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     // 콤마/공백으로 나누고 앞 5개만, 80자 이내로
     const keywords = line
       .split(/[,，\s]+/)
-      .map((s) => s.trim())
+      .map((s: string) => s.trim())
       .filter(Boolean)
       .slice(0, 5);
     const query = keywords.join(" ").slice(0, 80);
