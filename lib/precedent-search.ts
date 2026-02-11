@@ -67,17 +67,28 @@ export async function searchPrecedents(
       (data as Record<string, unknown>)?.Prec ??
       (data as Record<string, unknown>)?.판례 ??
       (Array.isArray(data) ? data : null);
-    const items: unknown[] = Array.isArray(rawItems) ? rawItems : [];
-    if (items.length === 0) return null;
+    const rawList: unknown[] = Array.isArray(rawItems) ? rawItems : [];
+    if (rawList.length === 0) return null;
 
-    const lines = items.slice(0, limit).map((p, i) => {
-      const num = i + 1;
+    // 확실한 정보만 사용: 사건명이 있고, 사건번호 또는 선고일자·법원명 중 하나라도 있는 항목만 포함
+    const validRows: { name: string; no: string; date: string; court: string }[] = [];
+    for (const p of rawList) {
       const row = p as Record<string, unknown>;
-      const name = String(row?.사건명 ?? row?.caseNm ?? "-");
-      const no = String(row?.사건번호 ?? row?.caseNo ?? "");
-      const date = String(row?.선고일자 ?? row?.선고일 ?? row?.jugdDe ?? "");
-      const court = String(row?.법원명 ?? row?.courtNm ?? "");
-      return `${num}. ${name} (${court} ${date} 선고 ${no})`;
+      const name = String(row?.사건명 ?? row?.caseNm ?? "").trim();
+      const no = String(row?.사건번호 ?? row?.caseNo ?? "").trim();
+      const date = String(row?.선고일자 ?? row?.선고일 ?? row?.jugdDe ?? "").trim();
+      const court = String(row?.법원명 ?? row?.courtNm ?? "").trim();
+      const hasName = name.length > 0 && name !== "-";
+      const hasIdentifier = no.length > 0 || date.length > 0 || court.length > 0;
+      if (hasName && hasIdentifier) {
+        validRows.push({ name, no, date, court });
+      }
+    }
+    if (validRows.length === 0) return null;
+
+    const lines = validRows.slice(0, limit).map((r, i) => {
+      const num = i + 1;
+      return `${num}. ${r.name} (${r.court} ${r.date} 선고 ${r.no})`;
     });
 
     return `---참조 판례 (국가법령정보센터 실시간 검색) ---\n${lines.join("\n")}\n---위 판례를 인용·적용하여 rationale에 논증하라---`;
