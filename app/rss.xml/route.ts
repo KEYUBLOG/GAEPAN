@@ -62,7 +62,7 @@ export async function GET() {
   <channel>
     <title>개판 AI - 개인들의 판결소</title>
     <link>${BASE_URL}</link>
-    <description>당신의 억울한 사연, AI 대법관과 배심원들이 판결해드립니다. 최신 판결문 피드입니다.</description>
+    <description>배심원 투표와 함께 최종 선고문을 만들어 드립니다. 최신 판결문 피드입니다.</description>
     <language>ko-KR</language>
     <lastBuildDate>${lastBuildDate}</lastBuildDate>
     <atom:link href="${BASE_URL}/rss.xml" rel="self" type="application/rss+xml"/>

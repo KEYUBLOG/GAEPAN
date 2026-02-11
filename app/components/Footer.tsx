@@ -30,6 +30,9 @@ export function Footer() {
       <p className="mx-auto mt-3 text-center text-xs text-zinc-500">
         Copyright © {new Date().getFullYear()} 개판 AI. All rights reserved.
       </p>
+      <p className="mx-auto mt-1 text-center text-[10px] text-zinc-600">
+        판례 검색: 국가법령정보센터(law.go.kr) 연동.
+      </p>
     </footer>
   );
 }

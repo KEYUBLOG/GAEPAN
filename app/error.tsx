@@ -21,7 +21,7 @@ export default function Error({
       <div className="max-w-md w-full rounded-2xl border border-zinc-800 bg-zinc-950 p-8 text-center">
         <p className="text-lg font-bold text-amber-400 mb-2">문제가 발생했습니다</p>
         <p className="text-sm text-zinc-400 mb-6">
-          일시적인 오류일 수 있습니다. 다시 시도하거나 메인으로 돌아가 주세요.
+          일시적인 오류일 수 있습니다. 사건 접수가 지연된 것일 수 있으니 다시 시도하거나 메인으로 돌아가 주세요.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <button

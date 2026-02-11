@@ -27,11 +27,11 @@ export const metadata: Metadata = {
   title: "개판 AI - 개인들의 판결소",
   icons: { icon: "/icon.png" },
   description:
-    "당신의 억울한 사연, AI 대법관과 배심원들이 판결해드립니다. 지금 바로 소장을 접수하세요.",
+    "배심원 투표와 함께 최종 선고문을 만들어 드립니다. 기소장 접수 후 24시간 뒤 선고문이 나옵니다.",
   openGraph: {
     title: "개판 AI - 개인들의 판결소",
     description:
-      "당신의 억울한 사연, AI 대법관과 배심원들이 판결해드립니다. 지금 바로 소장을 접수하세요.",
+      "배심원 투표와 함께 최종 선고문을 만들어 드립니다. 기소장 접수 후 24시간 뒤 선고문이 나옵니다.",
     url: "https://gaepanai.com",
     siteName: "개판 AI - 개인들의 판결소",
     images: [
@@ -39,7 +39,7 @@ export const metadata: Metadata = {
         url: "https://gaepanai.com/og-image.png",
         width: 1200,
         height: 630,
-        alt: "개판 - AI 법정",
+        alt: "개판 - 개인들의 판결소",
       },
     ],
     type: "website",
@@ -48,7 +48,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "개판 AI - 개인들의 판결소",
     description:
-      "당신의 억울한 사연, AI 대법관과 배심원들이 판결해드립니다. 지금 바로 소장을 접수하세요.",
+      "배심원 투표와 함께 최종 선고문을 만들어 드립니다. 기소장 접수 후 24시간 뒤 선고문이 나옵니다.",
     images: ["https://gaepanai.com/og-image.png"],
   },
   verification: {
@@ -73,7 +73,7 @@ export default function RootLayout({
     "@context": "https://schema.org",
     "@type": "WebSite",
     name: "개판 AI - 개인들의 판결소",
-    description: "당신의 억울한 사연, AI 대법관과 배심원들이 판결해드립니다. 지금 바로 소장을 접수하세요.",
+    description: "배심원 투표와 함께 최종 선고문을 만들어 드립니다. 기소장 접수 후 24시간 뒤 선고문이 나옵니다.",
     url: BASE_URL,
     inLanguage: "ko",
     potentialAction: {

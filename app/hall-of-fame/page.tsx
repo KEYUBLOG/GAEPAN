@@ -516,8 +516,8 @@ function HallOfFameContent() {
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     const pathname = typeof window !== "undefined" ? window.location.pathname : "/hall-of-fame";
     const url = `${origin}${pathname}?post=${postId}`;
-    const shareTitle = title || "개판 - AI 법정 판결문";
-    const text = `${shareTitle} - 개판에서 AI 대법관과 배심원의 판결을 확인하세요.`;
+    const shareTitle = title || "개판 - 판결문";
+    const text = `${shareTitle} - 개판에서 배심원 투표와 최종 선고를 확인하세요.`;
     const isLocal = /localhost|127\.0\.0\.1/.test(origin);
     try {
       if (!isLocal && typeof navigator !== "undefined" && navigator.share) {
@@ -1041,7 +1041,7 @@ function HallOfFameContent() {
                     )}
                   </div>
 
-                  {/* 최종 스코어 보드 — 하단 전체 폭 바 + AI 대법관 확정 라벨. 동점 시 번개 표시 */}
+                  {/* 최종 스코어 보드 — 하단 전체 폭 바 + 최종 선고 확정 라벨. 동점 시 번개 표시 */}
                   <div className="mt-auto space-y-2">
                     <div className="relative w-full h-3 md:h-4 bg-zinc-800/80 rounded-full overflow-visible flex border border-emerald-500/25">
                       {guiltyPct > 0 ? (
@@ -1050,7 +1050,7 @@ function HallOfFameContent() {
                           style={{ width: `${guiltyPct}%` }}
                         >
                           {guiltyPct >= 50 && p.guilty !== p.not_guilty ? (
-                            <span className="text-[9px] md:text-[10px] font-bold text-red-200/90 whitespace-nowrap">AI 대법관 최종 확정</span>
+                            <span className="text-[9px] md:text-[10px] font-bold text-red-200/90 whitespace-nowrap" aria-label="최종 선고 확정">최종 선고 확정</span>
                           ) : null}
                         </div>
                       ) : null}
@@ -1060,7 +1060,7 @@ function HallOfFameContent() {
                           style={{ width: `${notGuiltyPct}%` }}
                         >
                           {notGuiltyPct >= 50 && p.guilty !== p.not_guilty ? (
-                            <span className="text-[9px] md:text-[10px] font-bold text-blue-200/90 whitespace-nowrap">AI 대법관 최종 확정</span>
+                            <span className="text-[9px] md:text-[10px] font-bold text-blue-200/90 whitespace-nowrap" aria-label="최종 선고 확정">최종 선고 확정</span>
                           ) : null}
                         </div>
                       ) : null}
@@ -1093,7 +1093,7 @@ function HallOfFameContent() {
                       onClick={(e) => { e.stopPropagation(); setSelectedPost(p); }}
                       className="flex-1 rounded-xl border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 px-4 py-2.5 text-xs md:text-sm font-bold transition shadow-[0_0_16px_rgba(52,211,153,0.15)]"
                     >
-                      AI 판결문 전문 보기
+                      선고문 전문 보기
                     </button>
                     <Link
                       href="/"
@@ -1431,7 +1431,7 @@ function HallOfFameContent() {
 
               <div className="my-6 border-t border-dashed border-zinc-700" />
 
-              {/* 섹션 2: ⚖️ AI 대법관 선고 */}
+              {/* 섹션 2: ⚖️ 최종 선고 */}
               {(() => {
                 const isFinished = !isVotingOpen(selectedPost.created_at, selectedPost.voting_ended_at);
                 const aiRatio = selectedPost.ratio ?? 50;
@@ -1444,13 +1444,13 @@ function HallOfFameContent() {
                 const isFiftyFifty = guiltyPct === 50 && notGuiltyPct === 50;
                 const primaryLabel = guiltyPct >= notGuiltyPct ? "유죄" : "무죄";
                 return (
-                  <section className="space-y-4">
+                  <section className="space-y-4" aria-label="최종 선고">
                     <div>
                       <div className="text-xs font-black tracking-widest uppercase text-zinc-400">
-                        ⚖️ AI 대법관 선고
+                        ⚖️ 최종 선고
                       </div>
                       <p className="mt-1 text-xs text-zinc-500">
-                        이 사건에 대한 AI 대법관의 최종 판단과 그 근거입니다.
+                        이 사건에 대한 최종 선고와 그 근거입니다. 유사 판례(국가법령정보센터)를 참조해 작성될 수 있습니다.
                       </p>
                     </div>
                     <div
@@ -1466,7 +1466,7 @@ function HallOfFameContent() {
                         <span className={`text-xs sm:text-base font-semibold min-w-0 truncate ${
                           isFiftyFifty ? "text-amber-100" : primaryLabel === "유죄" ? "text-red-200" : "text-blue-200"
                         }`}>
-                          AI 최종 선고
+                          최종 선고
                         </span>
                         <span className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] ${
                           isFiftyFifty
@@ -1474,18 +1474,23 @@ function HallOfFameContent() {
                             : primaryLabel === "유죄"
                               ? "border-red-400/70 bg-red-500/20 text-red-200 shadow-[0_0_12px_rgba(239,68,68,0.4)]"
                               : "border-blue-400/70 bg-blue-500/20 text-blue-200 shadow-[0_0_12px_rgba(59,130,246,0.4)]"
-                        }`}>
-                          AI 대법관
+                        }`} aria-label="개판 선고 시스템">
+                          개판 선고
                         </span>
                       </div>
-                      <div className="mt-4 md:mt-5 text-center">
+                      <div className="mt-4 md:mt-5 text-center" aria-live="polite">
                         {isFiftyFifty ? (
-                          <p className="text-xl sm:text-3xl md:text-4xl font-black text-amber-400 whitespace-nowrap font-serif drop-shadow-[0_0_20px_rgba(245,158,11,0.4)]">
-                            [ ⚖️ 판결 유보 : 판단 불가 ]
-                          </p>
+                          <>
+                            <p className="text-xl sm:text-3xl md:text-4xl font-black text-amber-400 whitespace-nowrap drop-shadow-[0_0_20px_rgba(245,158,11,0.4)]">
+                              [ ⚖️ 판결 유보 : 판단 불가 ]
+                            </p>
+                            <p className="mt-1.5 text-[10px] text-zinc-500">
+                              배심원 투표가 동점이거나, 선고문 생성이 보류된 경우입니다.
+                            </p>
+                          </>
                         ) : (
                           <p
-                            className={`flex items-center justify-center gap-2 text-xl sm:text-3xl md:text-4xl font-black whitespace-nowrap font-serif ${
+                            className={`flex items-center justify-center gap-2 text-xl sm:text-3xl md:text-4xl font-black whitespace-nowrap ${
                               primaryLabel === "유죄"
                                 ? "text-red-300 drop-shadow-[0_0_24px_rgba(239,68,68,0.5)]"
                                 : "text-blue-300 drop-shadow-[0_0_24px_rgba(59,130,246,0.5)]"
@@ -1502,7 +1507,7 @@ function HallOfFameContent() {
                           </p>
                         )}
                       </div>
-                      {/* AI 상세 판결 */}
+                      {/* 4. 선고문 (상세 근거) */}
                       {(() => {
                         const raw =
                           selectedPost.verdict_rationale ??
@@ -1510,11 +1515,11 @@ function HallOfFameContent() {
                           "";
                         const rationale = typeof raw === "string" ? raw : "";
                         const displayText =
-                          sanitizeVerdictDisplay(rationale) || "상세 판결 근거가 기록되지 않은 사건입니다.";
+                          sanitizeVerdictDisplay(rationale) || "상세 판결 근거가 기록되지 않은 사건입니다. 이전 버전에서 작성된 사건이거나 기록이 누락되었을 수 있습니다.";
                         return (
                           <div className="mt-3 md:mt-4">
                             <div className="text-[11px] sm:text-xs font-semibold text-amber-100/90 mb-1">
-                              AI 상세 판결
+                              4. 선고문 (상세 근거)
                             </div>
                             <p className="text-xs sm:text-base text-amber-50 leading-relaxed whitespace-pre-wrap break-words">
                               {displayText}
@@ -1523,19 +1528,22 @@ function HallOfFameContent() {
                         );
                       })()}
                     </div>
+                    <p className="text-[10px] text-zinc-500" aria-live="polite">
+                      본 선고는 참고용이며, 법적 효력이 없습니다.
+                    </p>
                   </section>
                 );
               })()}
 
               <div className="my-6 border-t border-dashed border-zinc-700" />
 
-              {/* 섹션 3: 👥 배심원 평결 및 한마디 */}
+              {/* 섹션 2: 👥 배심원 평결 및 한마디 */}
               <div className="mb-4">
                 <div className="text-sm font-bold text-zinc-100 flex items-center gap-2">
                   <span>👥 배심원 평결 및 한마디</span>
                 </div>
                 <p className="mt-1 text-xs text-zinc-500">
-                  AI의 판결에 대해 배심원들이 어떻게 생각하는지 한눈에 볼 수 있습니다.
+                  실제 참여한 배심원 투표 결과와 한마디를 한눈에 볼 수 있습니다.
                 </p>
               </div>
 
@@ -1559,25 +1567,15 @@ function HallOfFameContent() {
                         <div className="grid grid-cols-2 gap-4">
                           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
                             <p className="text-[10px] font-bold uppercase text-amber-500/80 mb-1">AI 판사</p>
-                            <p className="text-sm font-bold text-amber-200">
+                            <p className={`text-sm font-bold ${aiVerdict === "유죄" ? "text-red-300" : "text-blue-300"}`}>
                               피고인 {aiVerdict}
                             </p>
-                            <div className="mt-2 h-2 bg-zinc-800 rounded-full overflow-hidden flex">
-                              <div className="bg-amber-500 h-full" style={{ width: `${aiPlaintiffPct}%` }} />
-                              <div className="bg-zinc-600 h-full" style={{ width: `${aiDefendantPct}%` }} />
-                            </div>
-                            <p className="text-[10px] text-zinc-500 mt-1">검사 {aiPlaintiffPct}% / 피고인 {aiDefendantPct}%</p>
                           </div>
                           <div className="rounded-xl border border-zinc-600 bg-zinc-800/50 p-3">
                             <p className="text-[10px] font-bold uppercase text-zinc-400 mb-1">배심원단</p>
-                            <p className="text-sm font-bold text-zinc-200">
+                            <p className={`text-sm font-bold ${juryVerdict === "유죄" ? "text-red-300" : "text-blue-300"}`}>
                               피고인 {juryVerdict}
                             </p>
-                            <div className="mt-2 h-2 bg-zinc-800 rounded-full overflow-hidden flex">
-                              <div className="bg-red-500/70 h-full" style={{ width: `${juryGuiltyPct}%` }} />
-                              <div className="bg-zinc-600 h-full" style={{ width: `${juryNotGuiltyPct}%` }} />
-                            </div>
-                            <p className="text-[10px] text-zinc-500 mt-1">유죄 {juryGuiltyPct}% / 무죄 {juryNotGuiltyPct}%</p>
                           </div>
                         </div>
                         <p className={`text-sm font-bold ${agreed ? "text-amber-400" : "text-red-400"}`}>
@@ -2387,7 +2385,7 @@ function HallOfFameContent() {
                   <div className="mt-5 grid gap-4">
                     <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
                       <div className="text-xs font-black tracking-widest uppercase text-zinc-400">
-                        사건 개요
+                        1. 사건 개요
                       </div>
                       <div className="mt-2 text-sm md:text-base text-zinc-100 leading-relaxed whitespace-pre-wrap">
                         {judgeResult.verdict.title}
@@ -2396,7 +2394,7 @@ function HallOfFameContent() {
 
                     <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4">
                       <div className="text-xs font-black tracking-widest uppercase text-amber-200">
-                        AI 최종 선고
+                        2. 최종 선고
                       </div>
                       <div className="mt-2 text-sm md:text-base font-bold leading-relaxed">
                         {(() => {
@@ -2416,12 +2414,15 @@ function HallOfFameContent() {
 
                     <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
                       <div className="text-xs font-black tracking-widest uppercase text-zinc-400">
-                        AI 상세 판결
+                        3. 선고문 (상세 근거)
                       </div>
                       <div className="mt-2 text-sm md:text-base text-zinc-300 leading-relaxed whitespace-pre-wrap">
                         {judgeResult.verdict.ratio.rationale}
                       </div>
                     </div>
+                    <p className="text-[10px] text-zinc-500 mt-2" aria-live="polite">
+                      본 선고는 참고용이며, 법적 효력이 없습니다.
+                    </p>
                   </div>
                 </div>
               ) : null}
