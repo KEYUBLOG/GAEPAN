@@ -12,7 +12,11 @@ export interface Database {
       votes: { Row: Record<string, unknown>; Insert: Record<string, unknown>; Update: Record<string, unknown> };
       vote_events: { Row: Record<string, unknown>; Insert: Record<string, unknown>; Update: Record<string, unknown> };
       reports: { Row: Record<string, unknown>; Insert: Record<string, unknown>; Update: Record<string, unknown> };
-      blocked_ips: { Row: Record<string, unknown>; Insert: Record<string, unknown>; Update: Record<string, unknown> };
+      blocked_ips: {
+        Row: { id?: string; ip_address: string; created_at?: string };
+        Insert: { id?: string; ip_address: string; created_at?: string };
+        Update: { id?: string; ip_address?: string; created_at?: string };
+      };
       blocked_keywords: { Row: Record<string, unknown>; Insert: Record<string, unknown>; Update: Record<string, unknown> };
       petition_comments: { Row: Record<string, unknown>; Insert: Record<string, unknown>; Update: Record<string, unknown> };
       petition_agrees: { Row: Record<string, unknown>; Insert: Record<string, unknown>; Update: Record<string, unknown> };
