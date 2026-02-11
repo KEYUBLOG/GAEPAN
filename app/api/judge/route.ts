@@ -266,11 +266,16 @@ async function callGemini(req: JudgeRequest): Promise<JudgeVerdict> {
     console.log("[GAEPAN][Judge] 실시간 판례 검색 결과 반영됨", precedentKeywords ? "(AI 키워드 사용)" : "");
   }
 
+  const categoryHint = req.category && ["연애", "친구", "가족", "직장생활", "결혼생활", "육아", "이웃/매너", "학교생활", "군대", "기타"].includes(req.category)
+    ? `[카테고리: ${req.category}] 이 글은 개인 간 갈등·고민·논쟁에 가깝습니다. 실제 살인·상해·사기·강도 등 형사범죄로 보이지 않으면 반드시 유머러스한 판결(야식 금지, 설거지, 커피 쏘기, 사과 1회 등)을 하라. 징역·벌금을 선고하지 말 것.`
+    : "";
+
   const userMessage = [
     "아래 사건에 대해 형사 재판 선고문을 작성하라.",
     "",
     trialInstruction,
     "",
+    ...(categoryHint ? [categoryHint, ""] : []),
     ...(precedentBlock
       ? [precedentBlock, ""]
       : ["[참조 판례 미제공] 이번 요청에는 참조 판례가 제공되지 않았습니다(API 미연동·오류 등). 구체적인 판례 번호·사건명·선고일자를 임의로 창작하지 말고, 법리와 조문만으로 논증하라.", ""]),
@@ -449,13 +454,14 @@ export async function POST(request: Request) {
           ? urls[0]
           : JSON.stringify(urls);
 
-    const req: JudgeRequest & { image_url: string | null } = {
+    const req: JudgeRequest & { image_url: string | null; category?: string } = {
       title: trimmedTitle,
       plaintiff: "익명",
       defendant: "익명",
       details: trimmedDetails,
       image_url: storedImageUrl,
       trial_type,
+      category,
     };
 
     const passwordHash = hashPassword(rawPassword);
