@@ -15,18 +15,34 @@ function extractKeywords(title: string, details: string): string {
 }
 
 /**
+ * 판례 검색에 쓸 쿼리 문자열 결정.
+ * queryOverride가 있으면 그걸 정규화해서 쓰고, 없으면 제목+경위에서 추출.
+ */
+function getQueryString(title: string, details: string, queryOverride?: string | null): string {
+  if (queryOverride && queryOverride.trim()) {
+    const oneLine = queryOverride.trim().replace(/\s+/g, " ").slice(0, 80);
+    return oneLine || extractKeywords(title, details);
+  }
+  return extractKeywords(title, details);
+}
+
+/**
  * 판례 목록 조회. OC 미설정 또는 API 오류 시 null 반환.
+ * @param queryOverride - 사건 본문 분석으로 얻은 검색 키워드(있으면 이걸로 검색, 없으면 제목+경위에서 추출)
  */
 export async function searchPrecedents(
   title: string,
   details: string,
-  limit = 10
+  limit = 10,
+  queryOverride?: string | null
 ): Promise<string | null> {
   const oc = process.env.LAW_GO_KR_OC?.trim();
   if (!oc || typeof window !== "undefined") return null;
 
-  const query = encodeURIComponent(extractKeywords(title, details));
-  const url = `${LAW_API_BASE}?OC=${encodeURIComponent(oc)}&target=prec&type=JSON&query=${query}&org=400201&display=${Math.min(limit, 20)}`;
+  const query = encodeURIComponent(getQueryString(title, details, queryOverride));
+  /** search=2: 본문 검색(판례 내용까지 검색), 1: 판례명만 */
+  const search = 2;
+  const url = `${LAW_API_BASE}?OC=${encodeURIComponent(oc)}&target=prec&type=JSON&query=${query}&search=${search}&org=400201&display=${Math.min(limit, 20)}`;
 
   try {
     const res = await fetch(url, {

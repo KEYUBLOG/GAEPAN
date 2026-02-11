@@ -129,6 +129,55 @@ function stripJsonFences(text: string) {
 const GEMINI_MAX_RETRIES = 2; // 최초 1회 + 재시도 2회 = 총 3회
 const GEMINI_RETRY_DELAY_MS = 1500;
 
+/**
+ * 사건 본문(제목+경위)을 분석해, 유사 판례를 찾을 때 쓸 검색 키워드(법적 쟁점·죄명 등)를 추출.
+ * 실패 시 null 반환. Judge에서 판례 검색 전에 호출해 queryOverride로 넘긴다.
+ */
+async function extractPrecedentKeywords(title: string, details: string): Promise<string | null> {
+  try {
+    assertGeminiEnv();
+    const apiKey = process.env.GEMINI_API_KEY!;
+    const modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: modelName });
+
+    const summary = [title, details].filter(Boolean).join("\n").trim().slice(0, 1500);
+    if (!summary) return null;
+
+    const prompt = [
+      "아래는 이용자가 제기한 사건 개요(제목과 경위)이다. 이 사건과 유사한 판례를 찾을 때 사용할 검색 키워드를 추출하라.",
+      "키워드는 법적 쟁점·죄명·민형사 개념 등 판례 검색에 적합한 한글 용어 3~5개로 한다. 예: 명예훼손, 손해배상, 불법행위, 모욕죄, 배임, 사기.",
+      "설명 없이 키워드만 한 줄에 콤마(,)로 구분해 출력하라. 사건 내용과 무관한 일반어는 쓰지 마라.",
+      "",
+      "---사건 개요---",
+      summary,
+      "---끝---",
+    ].join("\n");
+
+    const result = await Promise.race([
+      model.generateContent({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 80 },
+      } as any),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 6000)),
+    ]);
+
+    const raw = (result as any)?.response?.text?.() ?? "";
+    const line = raw.trim().split(/\n/)[0]?.trim() ?? "";
+    if (!line) return null;
+    // 콤마/공백으로 나누고 앞 5개만, 80자 이내로
+    const keywords = line
+      .split(/[,，\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 5);
+    const query = keywords.join(" ").slice(0, 80);
+    return query || null;
+  } catch {
+    return null;
+  }
+}
+
 async function callGemini(req: JudgeRequest): Promise<JudgeVerdict> {
   assertGeminiEnv();
   const apiKey = process.env.GEMINI_API_KEY!;
@@ -190,9 +239,11 @@ async function callGemini(req: JudgeRequest): Promise<JudgeVerdict> {
       ? "재판 목적: 무죄 주장(항변). 검사(나) 측 귀책이 없으면 verdict에 '본 대법관은 피고인에게 다음과 같이 선고한다.'로 시작한 뒤 '피고인 무죄. 불기소.'로 판단하고, ratio는 plaintiff 0 / defendant 100으로 한다."
       : "재판 목적: 유죄 주장(기소). 형법상 범죄이면 징역·사회봉사·벌금 등을, 사소한 일상 갈등이면 '야식 금지', '설거지 3회', '커피 쏘기' 등 유머러스한 주문을 verdict에 반드시 포함하라. 어떤 사연이든 '다음과 같이 선고한다' 뒤에 명확한 결론(주문)을 써라.";
 
-  const precedentBlock = await searchPrecedents(req.title, req.details, 8);
+  // 1) 사건 본문으로 유사 쟁점/키워드 추출 → 2) 그 키워드로 판례 API 검색
+  const precedentKeywords = await extractPrecedentKeywords(req.title, req.details).catch(() => null);
+  const precedentBlock = await searchPrecedents(req.title, req.details, 8, precedentKeywords ?? undefined);
   if (precedentBlock) {
-    console.log("[GAEPAN][Judge] 실시간 판례 검색 결과 반영됨");
+    console.log("[GAEPAN][Judge] 실시간 판례 검색 결과 반영됨", precedentKeywords ? "(AI 키워드 사용)" : "");
   }
 
   const userMessage = [
