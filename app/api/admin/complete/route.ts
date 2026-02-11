@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const { error: updateError } = await supabase
       .from("posts")
-      .update({ voting_ended_at: now } as any)
+      .update({ voting_ended_at: now })
       .eq("id", postId);
 
     if (updateError) {

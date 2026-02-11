@@ -79,8 +79,7 @@ export async function POST(request: Request) {
     // 2) blocked_ips에 upsert (service role 사용 시 RLS 우회)
     const { error: upsertError } = await supabase
       .from("blocked_ips")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .upsert({ ip_address: ip } as any, { onConflict: "ip_address" });
+      .upsert({ ip_address: ip }, { onConflict: "ip_address" });
 
     if (upsertError) {
       return NextResponse.json({ error: upsertError.message }, { status: 500 });

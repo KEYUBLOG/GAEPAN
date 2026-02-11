@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     const supabase = createSupabaseServerClient();
     const { data, error } = await supabase
       .from("blocked_keywords")
-      .insert({ keyword } as any)
+      .insert({ keyword })
       .select("id, keyword, created_at")
       .single();
     if (error) {
