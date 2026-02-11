@@ -33,15 +33,10 @@ const DEFAULT_TITLE = "답답한 사연 읽고 고구마 먹은 기분?";
 const DEFAULT_HIGHLIGHT = "'두쫀쿠'";
 const DEFAULT_SUFFIX = "로 달달하게 보충해 보세요.";
 
-/** 쿠팡 파트너스 배너: 본문과 어울리는 깔끔한 박스, 우측에 흐린 AD 표시 */
-export function CoupangBanner({
-  href = DEFAULT_COUPANG_LINK,
-  title = DEFAULT_TITLE,
-  highlight = DEFAULT_HIGHLIGHT,
-  suffix = DEFAULT_SUFFIX,
-  suffixAfterBr,
-  hideDisclaimer = false,
-}: Props) {
+/** 쿠팡 파트너스 배너: 본문과 어울리는 깔끔한 박스, 우측에 흐린 AD 표시 (현재 숨김 처리) */
+export function CoupangBanner(_props: Props) {
+  return null;
+  /* 숨김 해제 시 아래 return 사용
   return (
     <div className="w-full max-w-md md:max-w-lg">
       <a
@@ -89,4 +84,5 @@ export function CoupangBanner({
       )}
     </div>
   );
+  */
 }

@@ -20,8 +20,10 @@ function ShoppingIcon({ className }: { className?: string }) {
   );
 }
 
-/** 쿠팡 파트너스 링크 배너 — 로고 아래·전광판 위 등에 배치용 슬림 배너 */
-export function CoupangLinkBanner({ href = DEFAULT_HREF, className = "" }: Props) {
+/** 쿠팡 파트너스 링크 배너 — 로고 아래·전광판 위 등에 배치용 슬림 배너 (현재 숨김 처리) */
+export function CoupangLinkBanner(_props: Props) {
+  return null;
+  /* 숨김 해제 시 아래 return 사용
   return (
     <div className={className}>
       <a
@@ -46,4 +48,5 @@ export function CoupangLinkBanner({ href = DEFAULT_HREF, className = "" }: Props
       </p>
     </div>
   );
+  */
 }
