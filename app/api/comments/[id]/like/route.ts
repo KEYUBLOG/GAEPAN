@@ -1,34 +1,9 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase";
+import { getIp } from "@/lib/request-utils";
+import { isBlockedIp } from "@/lib/blocked-ip";
 
 export const runtime = "nodejs";
-
-/**
- * IP 추출 (비로그인 허용 → user_id 없이 ip_address만 사용)
- */
-function getIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
-    request.headers.get("cf-connecting-ip") ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
-}
-
-async function isBlockedIp(ip: string) {
-  if (!ip || ip === "unknown") return false;
-  const supabase = createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("blocked_ips")
-    .select("id")
-    .eq("ip_address", ip)
-    .maybeSingle();
-  if (error) {
-    console.error("[GAEPAN] blocked_ips check error (comment like):", error);
-    return false;
-  }
-  return !!data;
-}
 
 /**
  * POST: 댓글 발도장 토글 (Upsert 방식)

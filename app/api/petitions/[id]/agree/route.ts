@@ -1,31 +1,9 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase";
+import { getIp } from "@/lib/request-utils";
+import { isBlockedIp } from "@/lib/blocked-ip";
 
 export const runtime = "nodejs";
-
-function getIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
-    request.headers.get("cf-connecting-ip") ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
-}
-
-async function isBlockedIp(ip: string) {
-  if (!ip || ip === "unknown") return false;
-  const supabase = createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("blocked_ips")
-    .select("id")
-    .eq("ip_address", ip)
-    .maybeSingle();
-  if (error) {
-    console.error("[GAEPAN] blocked_ips check error (petition agree):", error);
-    return false;
-  }
-  return !!data;
-}
 
 /** POST: 청원 동의하기 */
 export async function POST(

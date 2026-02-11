@@ -3,15 +3,6 @@ import { createSupabaseServerClient } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
-function getIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
-    request.headers.get("cf-connecting-ip") ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
-}
-
 /** GET: 청원 리스트 조회 */
 export async function GET(request: Request) {
   try {

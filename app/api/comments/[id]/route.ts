@@ -1,12 +1,8 @@
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 import { createSupabaseServerClient } from "@/lib/supabase";
+import { hashPassword } from "@/lib/password";
 
 export const runtime = "nodejs";
-
-function hashPassword(pw: string): string {
-  return crypto.createHash("sha256").update(pw).digest("hex");
-}
 
 /** DELETE: 댓글/대댓글 삭제 (작성 시 입력한 삭제 비밀번호로만 삭제 가능) */
 export async function DELETE(

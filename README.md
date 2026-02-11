@@ -82,6 +82,14 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 사건 번호 컬럼 추가: `sql/posts_case_number.sql` 실행.  
 기소장·댓글 IP 컬럼 추가: `sql/ip_address_columns.sql` 실행.
 
+## 실시간 판례 검색
+
+기소장 제목·사건 경위를 바탕으로 **국가법령정보센터(law.go.kr)** 판례 API를 호출해 참조 판례를 검색합니다. 검색 결과는 Judge AI 프롬프트에 주입되어 판결문에 인용됩니다.
+
+**환경 변수:** `LAW_GO_KR_OC`  
+- [open.law.go.kr](https://open.law.go.kr)에서 API 신청 후 이메일 ID(OC)를 발급받아 `.env.local`에 설정합니다.  
+- 미설정 시 판례 검색은 건너뛰고, 기존 방식으로 판결문을 생성합니다.
+
 ## Deploy on Vercel
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.

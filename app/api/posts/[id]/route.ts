@@ -1,12 +1,8 @@
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 import { createSupabaseServerClient } from "@/lib/supabase";
+import { hashPassword } from "@/lib/password";
 
 export const runtime = "nodejs";
-
-function hashPassword(pw: string): string {
-  return crypto.createHash("sha256").update(pw).digest("hex");
-}
 
 /** DELETE: 판결문 삭제 (기소 시 설정한 비밀번호로만 삭제 가능) */
 export async function DELETE(

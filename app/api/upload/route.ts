@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase";
+import { jsonSuccess, jsonError } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -13,25 +14,16 @@ export async function POST(request: Request) {
     const file = formData.get("file");
 
     if (!file || !(file instanceof File)) {
-      return NextResponse.json(
-        { error: "파일이 없습니다." },
-        { status: 400 }
-      );
+      return NextResponse.json(jsonError("파일이 없습니다."), { status: 400 });
     }
 
     if (file.size > MAX_SIZE_BYTES) {
-      return NextResponse.json(
-        { error: "파일 크기는 5MB 이하여야 합니다." },
-        { status: 400 }
-      );
+      return NextResponse.json(jsonError("파일 크기는 5MB 이하여야 합니다."), { status: 400 });
     }
 
     const type = file.type?.toLowerCase() ?? "";
     if (!ALLOWED_TYPES.includes(type)) {
-      return NextResponse.json(
-        { error: "JPG, PNG, GIF, WebP 이미지만 업로드할 수 있습니다." },
-        { status: 400 }
-      );
+      return NextResponse.json(jsonError("JPG, PNG, GIF, WebP 이미지만 업로드할 수 있습니다."), { status: 400 });
     }
 
     const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
@@ -51,16 +43,16 @@ export async function POST(request: Request) {
     if (error) {
       console.error("[GAEPAN] Upload error:", error);
       return NextResponse.json(
-        { error: error.message || "업로드에 실패했습니다." },
+        jsonError(error.message || "업로드에 실패했습니다."),
         { status: 500 }
       );
     }
 
     const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
-    return NextResponse.json({ url: urlData.publicUrl });
+    return NextResponse.json(jsonSuccess({ url: urlData.publicUrl }));
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     console.error("[GAEPAN] Upload exception:", msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(jsonError(msg), { status: 500 });
   }
 }

@@ -1,16 +1,8 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase";
+import { getIp } from "@/lib/request-utils";
 
 export const runtime = "nodejs";
-
-function getIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
-    request.headers.get("cf-connecting-ip") ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
-}
 
 /** GET: 청원 상세 조회 */
 export async function GET(

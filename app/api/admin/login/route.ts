@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import crypto from "crypto";
+import { jsonSuccess, jsonError } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -20,18 +21,18 @@ export async function POST(request: Request) {
     const password = typeof body?.password === "string" ? body.password.trim() : "";
 
     if (!password) {
-      return NextResponse.json({ error: "비밀번호를 입력해주세요." }, { status: 400 });
+      return NextResponse.json(jsonError("비밀번호를 입력해주세요."), { status: 400 });
     }
 
     if (!OPERATOR_PASSWORD) {
       return NextResponse.json(
-        { error: "대법관 비밀번호가 설정되지 않았습니다." },
+        jsonError("대법관 비밀번호가 설정되지 않았습니다."),
         { status: 500 }
       );
     }
 
     if (!constantTimeCompare(password, OPERATOR_PASSWORD)) {
-      return NextResponse.json({ error: "비밀번호가 일치하지 않습니다." }, { status: 401 });
+      return NextResponse.json(jsonError("비밀번호가 일치하지 않습니다."), { status: 401 });
     }
 
     // 세션 쿠키 설정 (30일 유지)
@@ -44,9 +45,9 @@ export async function POST(request: Request) {
       path: "/",
     });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json(jsonSuccess({ success: true }));
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(jsonError(msg), { status: 500 });
   }
 }

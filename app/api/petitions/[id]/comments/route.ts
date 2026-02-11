@@ -1,13 +1,9 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase";
+import { isRlsError } from "@/lib/request-utils";
 import { cookies } from "next/headers";
 
 export const runtime = "nodejs";
-
-function isRlsError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return /row-level security|policy|RLS/i.test(msg);
-}
 
 /** GET: 청원 댓글 조회 (대법관 답변 포함) */
 export async function GET(

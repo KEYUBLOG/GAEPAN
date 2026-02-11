@@ -1,43 +1,12 @@
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 import { createSupabaseServerClient } from "@/lib/supabase";
 import { containsBlockedKeyword, maskBlockedKeywords } from "@/lib/blocked-keywords";
+import { getIp, isRlsError } from "@/lib/request-utils";
+import { isBlockedIp } from "@/lib/blocked-ip";
+import { hashPassword } from "@/lib/password";
 import { cookies } from "next/headers";
 
 export const runtime = "nodejs";
-
-function hashPassword(pw: string): string {
-  return crypto.createHash("sha256").update(pw).digest("hex");
-}
-
-function isRlsError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return /row-level security|policy|RLS/i.test(msg);
-}
-
-function getIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
-    request.headers.get("cf-connecting-ip") ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
-}
-
-async function isBlockedIp(ip: string) {
-  if (!ip || ip === "unknown") return false;
-  const supabase = createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("blocked_ips")
-    .select("id")
-    .eq("ip_address", ip)
-    .maybeSingle();
-  if (error) {
-    console.error("[GAEPAN] blocked_ips check error (comments):", error);
-    return false;
-  }
-  return !!data;
-}
 
 /** GET: 해당 기소장(post)의 배심원 한마디 목록 + 현재 IP 기준 발도장한 댓글 ID 목록 */
 export async function GET(
