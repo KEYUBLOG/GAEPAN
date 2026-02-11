@@ -55,7 +55,14 @@ export function sanitizeVerdictDisplay(text: string | null | undefined): string 
       return SAFE_RATIONALE_PLACEHOLDER;
     }
   }
-  return trimmed;
+  // 선고문에서 "4." 번호 제거: "4. "로 시작하는 줄 삭제
+  const withoutFour = trimmed
+    .split("\n")
+    .filter((line) => !/^\s*4\.\s/.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return withoutFour;
 }
 
 /**
