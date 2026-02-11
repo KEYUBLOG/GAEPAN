@@ -1573,7 +1573,7 @@ function OngoingTrialsContent() {
                           </motion.p>
                         )}
                       </div>
-                      {/* 4. 선고문 (상세 근거) */}
+                      {/* 선고문 (상세 근거) */}
                       {(() => {
                         const raw =
                           selectedPost.verdict_rationale ??
@@ -1585,7 +1585,7 @@ function OngoingTrialsContent() {
                         return (
                           <div className="mt-3 md:mt-4">
                             <div className="text-[11px] sm:text-xs font-semibold text-amber-100/90 mb-1">
-                              4. 선고문 (상세 근거)
+                              선고문 (상세 근거)
                             </div>
                             <p className="text-xs sm:text-base text-amber-50 leading-relaxed whitespace-pre-wrap break-words">
                               {displayText}

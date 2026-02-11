@@ -238,7 +238,6 @@ async function callGemini(req: JudgeRequest): Promise<JudgeVerdict> {
     "- 사소한 잘못·일상 갈등 유죄 시: '야식 금지 1주', '설거지 3회 실시', '커피 한 잔 쏘기' 등 유머러스한 주문을 선고한다. 징역·벌금을 쓰지 말 것.",
     "- 무죄·불기소 시: '피고인 무죄', '불기소'로 판단을 명시한다. 과실비율만 제시하고 주문이 없으면 안 된다. 예: '본 대법관은 피고인에게 다음과 같이 선고한다. 피고인 무죄. 불기소. 과실비율은 검사 X% / 피고인 Y%로 정한다.'",
     "- 어떤 사연이든 '다음과 같이 선고한다' 뒤에는 반드시 명확한 결론(주문)이 와야 한다. 생략·누락 금지.",
-    "- 선고문(verdict)에 주문을 번호로 나열할 때는 1., 2., 3.까지만 사용하고 4.는 사용하지 말라. 네 번째 항목이 있어도 4.로 적지 말고 3.까지만 두거나 문장으로 이어서 쓸 것.",
     "",
     "출력 규칙(최우선):",
     "- 반드시 유효한 JSON만 출력한다. 마크다운/코드펜스/여는말/닫는말 금지.",
@@ -324,7 +323,7 @@ async function callGemini(req: JudgeRequest): Promise<JudgeVerdict> {
     if (verdictSanitized === "상세 판결 근거를 불러올 수 없습니다.") {
       parsed.verdict = "본 대법관은 피고인에게 다음과 같이 선고한다. (선고문을 불러올 수 없습니다.)";
     } else {
-      parsed.verdict = verdictSanitized;
+      parsed.verdict = (parsed.verdict ?? "").trim();
     }
 
     if (req.trial_type === "DEFENSE" && p2 <= 10) {
