@@ -40,7 +40,7 @@ function isProbePath(pathname: string): boolean {
   return false;
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   if (isProbePath(request.nextUrl.pathname)) {
     return new NextResponse(null, { status: 404 });
   }
