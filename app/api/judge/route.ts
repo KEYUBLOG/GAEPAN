@@ -213,7 +213,7 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     const query = primaryTitle
       ? `${primaryTitle} 판례`.slice(0, 100)
       : filteredNames.length > 0
-        ? filteredNames.map((name) => `${name} 판례`).join(" ").slice(0, 120)
+        ? filteredNames.map((name: string) => `${name} 판례`).join(" ").slice(0, 120)
         : null;
     return { query: query ?? null, skip: false, caseType, defendantWronged };
   } catch {
