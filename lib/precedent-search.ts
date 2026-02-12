@@ -63,20 +63,23 @@ function parsePrecList(data: unknown): unknown[] {
 }
 
 type PrecRow = { name: string; no: string; date: string; court: string; id?: string };
+/** 검색 시 어떤 쿼리로 찾았는지 기록 — 사건명 검색어로 찾은 판례 우선 정렬용 */
+type PrecRowWithSource = PrecRow & { sourceQuery?: string };
 
-/** 본문(제목+경위)과 판례 사건명·검색어의 유사도. searchTerms가 있으면 검색어가 판례명에 나올 때 가산. */
+/** 본문(제목+경위)과 판례 사건명·검색어의 유사도. searchTerms·priorityCount 있으면 상위 N개 검색어로 찾은 판례에 가산. */
 function precedentRelevanceScore(
-  row: PrecRow,
+  row: PrecRow & { sourceQuery?: string },
   caseTitle: string,
   caseDetails: string,
-  searchTerms?: string[]
+  searchTerms?: string[],
+  priorityQueryCount = 0
 ): number {
   const toWords = (s: string) =>
     (s || "")
       .replace(/[\s,.\-·]+/g, " ")
       .trim()
       .split(/\s+/)
-      .filter((w) => w.length >= 2);
+      .filter((w: string) => w.length >= 2);
   const caseWords = new Set([...toWords(caseTitle), ...toWords((caseDetails || "").slice(0, 500))]);
   const nameWords = toWords(row.name);
   let score = 0;
@@ -90,8 +93,13 @@ function precedentRelevanceScore(
       const t = (term || "").trim();
       if (t.length < 2) continue;
       if (nameLower.includes(t)) score += 2;
-      else if (toWords(t).some((tw) => nameLower.includes(tw))) score += 1;
+      else if (toWords(t).some((tw: string) => nameLower.includes(tw))) score += 1;
     }
+  }
+  if (priorityQueryCount > 0 && searchTerms?.length && row.sourceQuery) {
+    const rq = (row.sourceQuery || "").trim();
+    const isPriority = searchTerms.slice(0, priorityQueryCount).some((t) => (t || "").trim() === rq);
+    if (isPriority) score += 40;
   }
   return score;
 }
@@ -202,6 +210,8 @@ export type SearchPrecedentsOptions = {
   preferredSingleWords?: string[];
   /** 단일어 검색으로 판례를 찾았을 때 호출 (자동 학습용) */
   onSingleWordSuccess?: (keyword: string) => void;
+  /** 검색어 배열 앞 N개는 '유사 사건명' — 이 검색어로 찾은 판례에 가산 (기본 2) */
+  priorityQueryCount?: number;
 };
 
 /**
@@ -226,9 +236,10 @@ export async function searchPrecedents(
 
   const display = Math.min(Math.max(limit, 15), 20);
   const seen = new Set<string>();
-  const validRows: PrecRow[] = [];
+  const validRows: PrecRowWithSource[] = [];
   let singleWordsTried: string[] = [];
   const onSingleWordSuccess = options?.onSingleWordSuccess;
+  const priorityQueryCount = options?.priorityQueryCount ?? 2;
 
   const runSearch = async (queryStr: string, search: 1 | 2): Promise<void> => {
     const q = (queryStr || "").trim().slice(0, 100);
@@ -304,7 +315,7 @@ export async function searchPrecedents(
         const key = row.no || `${row.name}|${row.date}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        validRows.push(row);
+        validRows.push({ ...row, sourceQuery: q });
         accepted++;
       }
       if (list.length > 0 && accepted === 0) {
@@ -380,7 +391,7 @@ export async function searchPrecedents(
     }
 
     const searchTerms = isQueryList ? (queryOverride as string[]) : undefined;
-    const nameScore = (r: PrecRow) => precedentRelevanceScore(r, title, details, searchTerms);
+    const nameScore = (r: PrecRowWithSource) => precedentRelevanceScore(r, title, details, searchTerms, priorityQueryCount);
     const sortedByName = [...validRows].sort((a, b) => nameScore(b) - nameScore(a));
     const topForDetail = Math.min(5, sortedByName.length);
     const caseText = `${title || ""} ${(details || "").slice(0, 600)}`;

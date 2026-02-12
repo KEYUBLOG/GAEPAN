@@ -367,6 +367,7 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
       precedentBlock = await searchPrecedents(req.title, req.details, 8, searchQuery, {
         preferredSingleWords: preferred,
         onSingleWordSuccess: supabase ? (k) => learnKeyword(supabase, k) : undefined,
+        priorityQueryCount: Math.min(3, keywordResult.queryList.length || 2),
       });
       if (precedentBlock && supabase) await setCachedPrecedents(supabase, queryKey, precedentBlock);
     }
