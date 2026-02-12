@@ -136,10 +136,18 @@ function stripJsonFences(text: string) {
 const GEMINI_MAX_RETRIES = 2; // 최초 1회 + 재시도 2회 = 총 3회
 const GEMINI_RETRY_DELAY_MS = 1500;
 
-export type PrecedentKeywordResult = { query: string | null; skip: boolean };
+export type PrecedentKeywordResult = {
+  query: string | null;
+  skip: boolean;
+  /** 본문 기준 '어떤 사건인지' (사기, 명예훼손, 손해배상 등) — 그 사건 유형에 대한 판례를 검색하기 위함 */
+  caseType: string | null;
+  /** 피고인이 억울해 보이는 사건이면 true → 무죄·형량 최소 유도 */
+  defendantWronged: boolean;
+};
 
 /**
- * 본문을 보고 "이 내용과 비슷한 판례 찾아줘"에 쓸 검색어 추출. 장난/농담/테스트 글은 skip=true로 필터링.
+ * 본문을 바탕으로 1) 어떤 사건인지(사건 유형) 파악 → 2) 그 사건 유형에 대한 판례 검색어 추출.
+ * 장난/농담은 skip. 피고인 억울함 여부도 판단해 Judge에서 무죄·형량 최소 유도에 사용.
  */
 async function extractPrecedentKeywords(title: string, details: string): Promise<PrecedentKeywordResult> {
   try {
@@ -150,15 +158,18 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     const model = genAI.getGenerativeModel({ model: modelName });
 
     const summary = [title, details].filter(Boolean).join("\n").trim().slice(0, 2000);
-    if (!summary) return { query: null, skip: false };
+    if (!summary) return { query: null, skip: false, caseType: null, defendantWronged: false };
 
     const prompt = [
-      "아래는 이용자가 올린 사건 개요(제목·경위)이다. 이 내용과 비슷한 대법원 판례를 찾아줄 검색어를 추출하라.",
+      "아래는 이용자가 올린 사건 개요(제목·경위)이다. '이 내용과 비슷한 사건 몇 가지'를 먼저 골라라. 그 사건명으로 '(사건명) 판례' 검색을 해서 대법원 판례를 찾을 것이다.",
       "",
-      "1) 장난·농담·테스트·허위·의미없는 글(예: ㅋㅋ, 테스트, 그냥 올림, 장난이에요 등)이면 판례 검색이 무의미하므로 '검색안함' 한 단어만 출력하라.",
-      "2) 진지한 법적·민사 분쟁 설명이면, 대법원 판례 사건명·요지에 나오는 한글 키워드 5~8개를 콤마(,)로만 출력하라. 예: 사기, 배임, 횡령, 상해, 명예훼손, 손해배상, 협박, 공동정범 등.",
+      "1) 장난·농담·테스트·허위·의미없는 글이면 '검색안함' 한 단어만 출력하라.",
+      "2) 진지한 사건이면 반드시 아래 세 줄을 순서대로 출력하라 (한 줄에 한 항목):",
+      "   첫째 줄: 사건 유형 한 줄 (예: 군무이탈·탈영, 사기죄, 명예훼손, 손해배상, 상해, 협박, 일상 갈등 등). 본문이 말하는 '이건 어떤 사건인지'만 적을 것.",
+      "   둘째 줄: 본문과 비슷한 대법원 사건명(또는 쟁점을 한 단어~몇 단어로) 3~5개, 콤마(,)로만 구분. 예: 군무이탈, 당번병 부대이탈, 탈영, 관사당번병, 무단이탈 / 또는 사기, 금원편취, 배임 / 명예훼손, 사실적시. (이 사건명들로 'OOO 판례' 검색을 하므로, 판례 검색에 잘 걸릴 사건명·쟁점명만 적을 것.)",
+      "   셋째 줄: 피고인(피고 측)이 억울해 보이면 '억울함', 아니면 '정상'.",
       "",
-      "규칙: 한 줄만 출력. '검색안함'이면 그 한 단어만. 검색어면 키워드만 콤마로. 설명·문장 금지.",
+      "규칙: 검색안함이면 한 줄만. 그 외에는 정확히 세 줄. 설명·추가 문장 금지.",
       "",
       "---사건 개요---",
       summary,
@@ -168,27 +179,36 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     const result = await Promise.race([
       model.generateContent({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.15, maxOutputTokens: 120 },
+        generationConfig: { temperature: 0.2, maxOutputTokens: 200 },
       } as any),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 8000)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 10000)),
     ]);
 
     const raw = (result as any)?.response?.text?.() ?? "";
-    const line = raw.trim().split(/\n/)[0]?.trim() ?? "";
-    if (!line) return { query: null, skip: false };
-    if (/검색안함|장난|농담|테스트|의미없|필요없/i.test(line) && line.length < 30) {
-      console.log("[GAEPAN][Judge] 판례 검색 생략(장난/농담 등으로 판단):", line.slice(0, 20));
-      return { query: null, skip: true };
+    const lines = raw.trim().split(/\n/).map((l: string) => l.trim()).filter(Boolean);
+    const first = lines[0] ?? "";
+    if (!first) return { query: null, skip: false, caseType: null, defendantWronged: false };
+    if (/검색안함|장난|농담|테스트|의미없|필요없/i.test(first) && first.length < 30) {
+      console.log("[GAEPAN][Judge] 판례 검색 생략(장난/농담 등으로 판단):", first.slice(0, 20));
+      return { query: null, skip: true, caseType: null, defendantWronged: false };
     }
-    const keywords = line
-      .split(/[,，\s]+/)
+    const caseType = first.slice(0, 80).trim() || null;
+    const second = lines[1] ?? "";
+    const similarCaseNames = second
+      .split(/[,，]/)
       .map((s: string) => s.trim())
       .filter(Boolean)
-      .slice(0, 8);
-    const query = keywords.join(" ").slice(0, 100);
-    return { query: query || null, skip: false };
+      .slice(0, 5);
+    // "(AI가 알려준 사건명)+판례" 로 검색해 해당 사건에 대한 판례를 API로 정확히 가져옴
+    const query =
+      similarCaseNames.length > 0
+        ? similarCaseNames.map((name) => `${name} 판례`).join(" ").slice(0, 120)
+        : null;
+    const third = (lines[2] ?? "").toLowerCase();
+    const defendantWronged = /억울|무혐의|오인|착오|잘못\s*기소|혐의\s*없/i.test(third) || third.includes("억울함");
+    return { query: query ?? null, skip: false, caseType, defendantWronged };
   } catch {
-    return { query: null, skip: false };
+    return { query: null, skip: false, caseType: null, defendantWronged: false };
   }
 }
 
@@ -227,6 +247,7 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
     "판결 기준(필수):",
     "- 엄격한 형법상 범죄 여부뿐만 아니라 사회 통념, 도덕적 과실, 에티켓·예의 위반 여부도 판결 기준에 포함하라.",
     "- 형법상 범죄가 아닌 사소한 일상 갈등(예: 배려 부족, 말실수, 무례한 행동)도 반드시 판결하라. '죄가 아니므로 판결 불가'로 끝내지 말 것.",
+    "- 피고인이 억울한 사건(무죄 주장·오인·혐의 불충분 등)이면 무죄 또는 형량 최소화를 적극 검토하라. 의심스러우면 피고인에게 유리하게, 유죄 시에도 집행유예·최소 형량을 우선 고려하라.",
     "",
     "진지한 사건 우선(최우선):",
     "- 사건 경위에 살인·상해·과실치사·사기·강도·성폭력·협박·중대한 폭행·배임·횡령·절도·손해배상·치사·사망·상해·금원 편취·피해 등이 구체적으로 나오면, 카테고리가 연애/친구/가족 등이어도 유머러스한 주문(야식 금지, 설거지, 커피 쏘기 등)을 쓰지 말라. 반드시 진지한 형량(징역·벌금·집행유예·사회봉사)을 조문에 따라 선고하라. 이 규칙이 아래 '유머러스 판결' 규칙보다 우선한다.",
@@ -302,9 +323,14 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
       ? "재판 목적: 무죄 주장(항변). 검사(나) 측 귀책이 없으면 verdict에 '본 대법관은 피고인에게 다음과 같이 선고한다.'로 시작한 뒤 '피고인 무죄. 불기소.'로 판단하고, ratio는 plaintiff 0 / defendant 100으로 한다."
       : "재판 목적: 유죄 주장(기소). 형법상 범죄이면 징역·사회봉사·벌금 등을, 사소한 일상 갈등이면 '야식 금지', '설거지 3회', '커피 쏘기' 등 구체적 주문만 verdict에 포함하라. verdict에 '유머러스한' 등 메타 표현 쓰지 말 것. 어떤 사연이든 '다음과 같이 선고한다' 뒤에 명확한 결론(주문)을 써라.";
 
-  // 1) "이 내용과 비슷한 판례 찾아줘" 검색어 추출 (장난/농담이면 skip) → 2) 캐시 확인 → 3) API 검색. 성공 시 캐시·학습
-  const keywordResult = await extractPrecedentKeywords(req.title, req.details).catch(() => ({ query: null, skip: false }));
-  const queryKey = [keywordResult.query ?? "", req.title, req.details.slice(0, 300)].join(" ").trim();
+  // 1) 본문으로 '어떤 사건인지' 파악 + 그 사건 유형에 대한 판례 검색어 추출 (장난/농담이면 skip) → 2) 캐시 → 3) API 검색
+  const keywordResult = await extractPrecedentKeywords(req.title, req.details).catch(() => ({
+    query: null,
+    skip: false,
+    caseType: null,
+    defendantWronged: false,
+  }));
+  const queryKey = [keywordResult.query ?? "", keywordResult.caseType ?? "", req.title, req.details.slice(0, 300)].join(" ").trim();
   let precedentBlock: string | null = null;
   if (!keywordResult.skip) {
     if (supabase) {
@@ -321,13 +347,14 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
     }
   }
   if (precedentBlock) {
-    console.log("[GAEPAN][Judge] 실시간 판례 검색 결과 반영됨", keywordResult.query ? "(AI 검색어 사용)" : "");
+    console.log("[GAEPAN][Judge] 실시간 판례 검색 결과 반영됨", keywordResult.caseType ? `사건유형: ${keywordResult.caseType}` : "", keywordResult.query ? "(AI 검색어 사용)" : "");
   } else if (keywordResult.skip) {
     console.log("[GAEPAN][Judge] 참조 판례 미사용 — 장난/농담 등으로 검색 생략.");
   } else {
     console.log("[GAEPAN][Judge] 참조 판례 미사용 — LAW_GO_KR_OC 미설정, API 오류, 또는 검색 0건. 위 [GAEPAN][판례] 로그 확인.");
   }
 
+  const defendantWronged = keywordResult.defendantWronged || req.trial_type === "DEFENSE";
   const isHumorousCategory = req.category && ["연애", "친구", "가족", "직장생활", "결혼생활", "육아", "이웃/매너", "학교생활", "군대", "기타"].includes(req.category);
   const categoryHint = isHumorousCategory
     ? `【유머러스 적용 조건】 카테고리: ${req.category}. 단, 사건 경위에 살인·상해·사기·강도·성폭력·협박·치사·중대한 폭행·배임·횡령·금원 편취·피해·사망 등이 구체적으로 나오면 유머러스 선고를 하지 말고 반드시 징역·벌금·집행유예 등 진지한 형량으로 선고하라. 진짜 형사사건이 아닌 일상 갈등일 때만 '야식 금지', '설거지 3회', '사과 1회' 등 가벼운 주문으로 선고할 것.`
@@ -335,6 +362,15 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
 
   const userMessage = [
     ...(categoryHint ? [categoryHint, "", "---", ""] : []),
+    ...(defendantWronged
+      ? [
+          "【피고인 억울한 사건】 사건 경위상 피고인(피고 측)이 억울해 보이거나 무죄를 주장하는 경우이다. 혐의가 충분히 입증되지 않으면 무죄·불기소를 적극 검토하고, 유죄가 불가피할 때에도 형량 최소화(집행유예·벌금·최소 징역)를 우선 검토하라. 의심스러우면 피고인에게 유리하게 판단하라.",
+          "",
+        ]
+      : []),
+    ...(keywordResult.caseType
+      ? [`【사건 유형】 본건은 '${keywordResult.caseType}'에 해당하는 사건이다. 아래 참조 판례는 이 유형에 대한 대법원 판례이다.`, ""]
+      : []),
     "아래 사건에 대해 형사 재판 선고문을 작성하라.",
     "",
     trialInstruction,
