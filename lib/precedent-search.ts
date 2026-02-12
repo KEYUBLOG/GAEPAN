@@ -64,8 +64,13 @@ function parsePrecList(data: unknown): unknown[] {
 
 type PrecRow = { name: string; no: string; date: string; court: string; id?: string };
 
-/** 본문(제목+경위)과 판례 사건명의 단어 겹침 수. 높을수록 본건과 유사한 판례. */
-function precedentRelevanceScore(row: PrecRow, caseTitle: string, caseDetails: string): number {
+/** 본문(제목+경위)과 판례 사건명·검색어의 유사도. searchTerms가 있으면 검색어가 판례명에 나올 때 가산. */
+function precedentRelevanceScore(
+  row: PrecRow,
+  caseTitle: string,
+  caseDetails: string,
+  searchTerms?: string[]
+): number {
   const toWords = (s: string) =>
     (s || "")
       .replace(/[\s,.\-·]+/g, " ")
@@ -79,7 +84,34 @@ function precedentRelevanceScore(row: PrecRow, caseTitle: string, caseDetails: s
     if (caseWords.has(w)) score += 2;
     else if ([...caseWords].some((c) => c.includes(w) || w.includes(c))) score += 1;
   }
+  if (searchTerms?.length) {
+    const nameLower = row.name;
+    for (const term of searchTerms) {
+      const t = (term || "").trim();
+      if (t.length < 2) continue;
+      if (nameLower.includes(t)) score += 2;
+      else if (toWords(t).some((tw) => nameLower.includes(tw))) score += 1;
+    }
+  }
   return score;
+}
+
+/** 두 텍스트 간 단어 겹침 점수 (판시사항·본문 비교용). */
+function textOverlapScore(caseText: string, precedentText: string): number {
+  const toWords = (s: string) =>
+    (s || "")
+      .replace(/[\s,.\-·]+/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length >= 2);
+  const caseSet = new Set(toWords(caseText.slice(0, 800)));
+  const precWords = toWords(precedentText.slice(0, 1500));
+  let n = 0;
+  for (const w of precWords) {
+    if (caseSet.has(w)) n += 2;
+    else if ([...caseSet].some((c) => c.includes(w) || w.includes(c))) n += 1;
+  }
+  return n;
 }
 
 /** 한 건의 판례에서 사건명·번호·일자·법원·일련번호 추출 (상세 API 호출용) */
@@ -347,16 +379,41 @@ export async function searchPrecedents(
       return null;
     }
 
-    const sorted = [...validRows].sort(
-      (a, b) => precedentRelevanceScore(b, title, details) - precedentRelevanceScore(a, title, details)
-    );
+    const searchTerms = isQueryList ? (queryOverride as string[]) : undefined;
+    const nameScore = (r: PrecRow) => precedentRelevanceScore(r, title, details, searchTerms);
+    const sortedByName = [...validRows].sort((a, b) => nameScore(b) - nameScore(a));
+    const topForDetail = Math.min(5, sortedByName.length);
+    const caseText = `${title || ""} ${(details || "").slice(0, 600)}`;
+    const contentScoreMap = new Map<string, number>();
+    const detailCache = new Map<string, { 판시사항?: string; 판결요지?: string; 판례내용?: string }>();
+    for (let i = 0; i < topForDetail; i++) {
+      const r = sortedByName[i];
+      const key = `${r.no}|${r.name}`;
+      if (!r.id) {
+        contentScoreMap.set(key, nameScore(r));
+        continue;
+      }
+      const detail = await fetchPrecedentDetail(r.id);
+      if (detail) detailCache.set(key, detail);
+      const detailText = detail
+        ? [detail.판시사항, detail.판결요지, detail.판례내용].filter(Boolean).join(" ")
+        : "";
+      contentScoreMap.set(key, textOverlapScore(caseText, `${r.name} ${detailText}`));
+    }
+    const sorted = [...validRows].sort((a, b) => {
+      const keyA = `${a.no}|${a.name}`;
+      const keyB = `${b.no}|${b.name}`;
+      const scoreA = contentScoreMap.get(keyA) ?? nameScore(a);
+      const scoreB = contentScoreMap.get(keyB) ?? nameScore(b);
+      return scoreB - scoreA;
+    });
     const rowsToShow = sorted.slice(0, limit);
     const detailCount = 2;
     const rowsWithDetail = rowsToShow.filter((r) => r.id).slice(0, detailCount);
     const detailTexts: string[] = [];
     for (const r of rowsWithDetail) {
       if (!r.id) continue;
-      const detail = await fetchPrecedentDetail(r.id);
+      const detail = detailCache.get(`${r.no}|${r.name}`) ?? (await fetchPrecedentDetail(r.id!));
       if (!detail) continue;
       const parts: string[] = [];
       if (detail.판시사항) parts.push(`[판시사항] ${detail.판시사항.slice(0, 1200)}`);

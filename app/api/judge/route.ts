@@ -140,6 +140,8 @@ export type PrecedentKeywordResult = {
   query: string | null;
   /** AI가 준 유사 사건 명칭 전부 — 각각 따로 법령 API 검색함 */
   queryList: string[];
+  /** 본건 죄명·쟁점 키워드(추가 검색어) */
+  keywordList: string[];
   skip: boolean;
   caseType: string | null;
   defendantWronged: boolean;
@@ -158,17 +160,17 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     const model = genAI.getGenerativeModel({ model: modelName });
 
     const summary = [title, details].filter(Boolean).join("\n").trim().slice(0, 2000);
-    if (!summary) return { query: null, queryList: [], skip: false, caseType: null, defendantWronged: false };
+    if (!summary) return { query: null, queryList: [], keywordList: [], skip: false, caseType: null, defendantWronged: false };
 
     const prompt = [
-      "아래 본문 내용과 **가장 유사한** 사건의 정확한 사건 명칭만 한 줄로 알려줘.",
+      "아래 본문을 보고 판례 검색에 쓸 검색어를 두 줄로만 출력하라.",
       "",
-      "조건: 본건(본문)과 같은 유형·쟁점·죄명의 판례가 검색되도록, 실제 판례·법조계에서 쓰는 **정확한 한글 사건명**만 적을 것. 관련성 높은 순서대로 3~5개만 콤마(,)로 구분. 【금지】 판례 번호(2010도13410 등)는 쓰지 말 것.",
+      "1) 장난·농담·테스트·허위·의미없는 글이면 '검색안함' 한 단어만 출력.",
+      "2) 진지한 사건이면:",
+      "   첫 줄: 본문과 **가장 유사한** 사건의 정확한 한글 사건 명칭 3~5개 (콤마 구분). 판례·법조계에서 쓰는 명칭만. 【금지】 판례 번호(2010도13410 등) 쓰지 말 것. 예: 관사 당번병 무단이탈, 군무이탈 당번병 부대이탈",
+      "   둘째 줄: 본건의 **죄명·쟁점 키워드** 3~5개 (콤마 구분). 한·두 단어. 예: 탈영, 군무이탈, 당번병, 복귀의사",
       "",
-      "1) 장난·농담·테스트·허위·의미없는 글이면 '검색안함' 한 단어만 출력하라.",
-      "2) 진지한 사건이면 본문과 가장 유사한 사건 명칭만(본건과 같은 상황·죄명이 나오는 판례가 검색되는 명칭) 순서대로 콤마로. 예: 관사 당번병 무단이탈, 군무이탈 당번병 부대이탈",
-      "",
-      "규칙: 출력은 한 줄만. 검색안함이면 그 한 단어만, 아니면 사건 명칭만 관련성 높은 순으로 콤마로.",
+      "규칙: 출력은 최대 두 줄. 검색안함이면 첫 줄만. 아니면 첫 줄=사건명, 둘째 줄=키워드.",
       "",
       "---사건 개요(본문)---",
       summary,
@@ -178,17 +180,18 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     const result = await Promise.race([
       model.generateContent({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 180 },
+        generationConfig: { temperature: 0.2, maxOutputTokens: 220 },
       } as any),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 10000)),
     ]);
 
     const raw = (result as any)?.response?.text?.() ?? "";
-    const line = raw.trim().split(/\n/).map((l: string) => l.trim()).filter(Boolean)[0] ?? "";
-    if (!line) return { query: null, queryList: [], skip: false, caseType: null, defendantWronged: false };
+    const lines = raw.trim().split(/\n/).map((l: string) => l.trim()).filter(Boolean);
+    const line = lines[0] ?? "";
+    if (!line) return { query: null, queryList: [], keywordList: [], skip: false, caseType: null, defendantWronged: false };
     if (/검색안함|장난|농담|테스트|의미없|필요없/i.test(line) && line.length < 30) {
       console.log("[GAEPAN][Judge] 판례 검색 생략(장난/농담 등으로 판단):", line.slice(0, 20));
-      return { query: null, queryList: [], skip: true, caseType: null, defendantWronged: false };
+      return { query: null, queryList: [], keywordList: [], skip: true, caseType: null, defendantWronged: false };
     }
     const similarCaseNames = line
       .split(/[,，]/)
@@ -196,10 +199,16 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
       .filter(Boolean)
       .slice(0, 5);
     const filteredNames = similarCaseNames.filter((n: string) => !/^\d{4}\s*(도|다|가|나)\s*\d+$/.test(n.replace(/\s/g, "")));
+    const keywordLine = lines[1] ?? "";
+    const keywordList = keywordLine
+      .split(/[,，]/)
+      .map((s: string) => s.trim())
+      .filter((w) => w.length >= 2 && !/^\d{4}\s*(도|다|가|나)\s*\d+$/.test(w.replace(/\s/g, "")))
+      .slice(0, 5);
     const query = filteredNames.length > 0 ? filteredNames[0].slice(0, 100) : null;
-    return { query: query ?? null, queryList: filteredNames, skip: false, caseType: null, defendantWronged: false };
+    return { query: query ?? null, queryList: filteredNames, keywordList, skip: false, caseType: null, defendantWronged: false };
   } catch {
-    return { query: null, queryList: [], skip: false, caseType: null, defendantWronged: false };
+    return { query: null, queryList: [], keywordList: [], skip: false, caseType: null, defendantWronged: false };
   }
 }
 
@@ -215,12 +224,19 @@ function normalizeCaseNumber(num: string): string {
   return n;
 }
 
-/** 참조 판례 블록에서 사건번호(2019도12345, 88도1238 등)만 추출 — 2자리 연도는 4자리로 정규화해 허용 목록에 넣음 */
+/** 참조 판례 블록에서 사건번호 추출. 1번(가장 유사한)만 허용 — 잘못된 판례 번호(2번 이후) 인용 방지. */
 function parseAllowedPrecedentCaseNumbers(block: string): Set<string> {
   const set = new Set<string>();
+  const firstLineRe = /^\s*1\.\s+[^\n]+선고\s+(\d{2,4}\s*(?:도|다|가|나)\s*\d+)/m;
+  const firstMatch = block.match(firstLineRe);
+  if (firstMatch) {
+    const raw = firstMatch[1].replace(/\s/g, "");
+    set.add(raw.length <= 8 ? normalizeCaseNumber(raw) : raw);
+    return set;
+  }
   const re = /\d{2,4}\s*(도|다|가|나)\s*\d+/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(block)) !== null) {
+  if ((m = re.exec(block)) !== null) {
     const raw = m[0].replace(/\s/g, "");
     set.add(raw.length <= 8 ? normalizeCaseNumber(raw) : raw);
   }
@@ -332,11 +348,13 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
   const keywordResult = await extractPrecedentKeywords(req.title, req.details).catch(() => ({
     query: null,
     queryList: [],
+    keywordList: [],
     skip: false,
     caseType: null,
     defendantWronged: false,
   }));
-  const queryKey = [keywordResult.queryList.length > 0 ? keywordResult.queryList.join(" ") : keywordResult.query ?? "", keywordResult.caseType ?? "", req.title, req.details.slice(0, 300)].join(" ").trim();
+  const allSearchTerms = [...keywordResult.queryList, ...(keywordResult.keywordList ?? [])];
+  const queryKey = [allSearchTerms.length > 0 ? allSearchTerms.join(" ") : keywordResult.query ?? "", keywordResult.caseType ?? "", req.title, req.details.slice(0, 300)].join(" ").trim();
   let precedentBlock: string | null = null;
   if (!keywordResult.skip) {
     if (supabase) {
@@ -345,7 +363,7 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
     }
     if (!precedentBlock) {
       const preferred = supabase ? await getPreferredKeywords(supabase) : [];
-      const searchQuery = keywordResult.queryList.length > 0 ? keywordResult.queryList : (keywordResult.query ? [keywordResult.query] : undefined);
+      const searchQuery = allSearchTerms.length > 0 ? allSearchTerms : (keywordResult.query ? [keywordResult.query] : undefined);
       precedentBlock = await searchPrecedents(req.title, req.details, 8, searchQuery, {
         preferredSingleWords: preferred,
         onSingleWordSuccess: supabase ? (k) => learnKeyword(supabase, k) : undefined,
@@ -387,8 +405,8 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
       ? [
           precedentBlock,
           "",
-          "[필수] 위 '참조 판례' 목록에 있는 대법원 판례 중 최소 1건 이상을 rationale(상세 판결 근거)에 반드시 인용하라. '대법원 20XX. X. X. 선고 20XX도XXXX 판결' 형식으로 적고, 해당 판례의 법리를 본건에 적용한 내용을 rationale에 포함할 것. 선고문에 실제 대법원 판례를 넣지 않으면 안 된다.",
-          "[확정] 위 참조 판례는 국가법령정보센터(법령 API)로 확인된 판례만 포함되어 있다. 이 목록에 없는 판례 번호·사건명을 임의로 만들지 말라. 목록에 없는 판례를 인용하면 출력에서 삭제된다.",
+          "[필수] 위 참조 판례 목록은 본건과 유사도 순이다. **1번 판례만 인용**하라. 1번에 적힌 사건번호와 법리를 rationale·선고문에 그대로 적용할 것. 2번 이후 판례 번호는 인용하지 말 것. 인용 형식: '대법원 20XX. X. X. 선고 XX도XXXX 판결'.",
+          "[확정] 인용 가능한 판례 번호는 목록 1번에 적힌 사건번호 하나뿐이다. 그 외 번호를 쓰면 출력에서 삭제된다.",
           "",
         ]
       : ["[참조 판례 미제공] 이번 요청에는 참조 판례가 제공되지 않았습니다(API 미연동·오류 등). 구체적인 판례 번호·사건명·선고일자를 임의로 창작하지 말고, 법리와 조문만으로 논증하라.", ""]),
