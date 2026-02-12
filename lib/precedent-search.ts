@@ -64,6 +64,24 @@ function parsePrecList(data: unknown): unknown[] {
 
 type PrecRow = { name: string; no: string; date: string; court: string; id?: string };
 
+/** 본문(제목+경위)과 판례 사건명의 단어 겹침 수. 높을수록 본건과 유사한 판례. */
+function precedentRelevanceScore(row: PrecRow, caseTitle: string, caseDetails: string): number {
+  const toWords = (s: string) =>
+    (s || "")
+      .replace(/[\s,.\-·]+/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length >= 2);
+  const caseWords = new Set([...toWords(caseTitle), ...toWords((caseDetails || "").slice(0, 500))]);
+  const nameWords = toWords(row.name);
+  let score = 0;
+  for (const w of nameWords) {
+    if (caseWords.has(w)) score += 2;
+    else if ([...caseWords].some((c) => c.includes(w) || w.includes(c))) score += 1;
+  }
+  return score;
+}
+
 /** 한 건의 판례에서 사건명·번호·일자·법원·일련번호 추출 (상세 API 호출용) */
 function toRow(p: unknown): PrecRow | null {
   const row = p as Record<string, unknown>;
@@ -329,7 +347,10 @@ export async function searchPrecedents(
       return null;
     }
 
-    const rowsToShow = validRows.slice(0, limit);
+    const sorted = [...validRows].sort(
+      (a, b) => precedentRelevanceScore(b, title, details) - precedentRelevanceScore(a, title, details)
+    );
+    const rowsToShow = sorted.slice(0, limit);
     const detailCount = 2;
     const rowsWithDetail = rowsToShow.filter((r) => r.id).slice(0, detailCount);
     const detailTexts: string[] = [];
