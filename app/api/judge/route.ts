@@ -136,11 +136,12 @@ function stripJsonFences(text: string) {
 const GEMINI_MAX_RETRIES = 2; // 최초 1회 + 재시도 2회 = 총 3회
 const GEMINI_RETRY_DELAY_MS = 1500;
 
+export type PrecedentKeywordResult = { query: string | null; skip: boolean };
+
 /**
- * 사건 본문(제목+경위)을 분석해, 대법원 판례 검색에 쓸 검색 키워드(죄명·법적 쟁점 등)를 추출.
- * 실패 시 null 반환. Judge에서 판례 검색 전에 호출해 queryOverride로 넘긴다.
+ * 본문을 보고 "이 내용과 비슷한 판례 찾아줘"에 쓸 검색어 추출. 장난/농담/테스트 글은 skip=true로 필터링.
  */
-async function extractPrecedentKeywords(title: string, details: string): Promise<string | null> {
+async function extractPrecedentKeywords(title: string, details: string): Promise<PrecedentKeywordResult> {
   try {
     assertGeminiEnv();
     const apiKey = process.env.GEMINI_API_KEY!;
@@ -149,18 +150,15 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     const model = genAI.getGenerativeModel({ model: modelName });
 
     const summary = [title, details].filter(Boolean).join("\n").trim().slice(0, 2000);
-    if (!summary) return null;
+    if (!summary) return { query: null, skip: false };
 
     const prompt = [
-      "당신은 대한민국 대법원 판례 검색에 최적화된 키워드를 추출하는 전문가이다.",
-      "아래 사건 개요(제목·경위)를 읽고, 국가법령정보센터(law.go.kr) 판례 검색에서 대법원 판례를 확실히 찾을 수 있도록 검색어를 추출하라.",
+      "아래는 이용자가 올린 사건 개요(제목·경위)이다. 이 내용과 비슷한 대법원 판례를 찾아줄 검색어를 추출하라.",
       "",
-      "반드시 포함할 것:",
-      "1) 대법원 판례 '사건명'에 자주 나오는 죄명·쟁점: 사기, 배임, 횡령, 절도, 상해, 과실치사, 명예훼손, 모욕, 협박, 손해배상, 부당이득, 불법행위, 정당방위, 공동정범, 교사방조 등. 사건 내용이 해당하면 반드시 넣을 것.",
-      "2) 판례 요지·본문에 나오는 한글 법률 용어: 금원 편취, 재산상 손해, 신뢰 관계, 배임행위, 폭행, 사실 적시, 고의, 과실, 인과관계 등.",
-      "3) 이용자가 구체적 사건(예: 특정 판례와 유사한 사건)을 적었으면, 그와 동일·유사한 표현을 키워드에 넣어 검색되게 할 것.",
+      "1) 장난·농담·테스트·허위·의미없는 글(예: ㅋㅋ, 테스트, 그냥 올림, 장난이에요 등)이면 판례 검색이 무의미하므로 '검색안함' 한 단어만 출력하라.",
+      "2) 진지한 법적·민사 분쟁 설명이면, 대법원 판례 사건명·요지에 나오는 한글 키워드 5~8개를 콤마(,)로만 출력하라. 예: 사기, 배임, 횡령, 상해, 명예훼손, 손해배상, 협박, 공동정범 등.",
       "",
-      "규칙: 한글만. 대법원 판례 사건명·요지에 실제로 쓰이는 단어만. 5~8개를 콤마(,)로 구분해 한 줄로만 출력. 설명 금지. 짧고 핵심만(사건명 검색에 잘 걸리게).",
+      "규칙: 한 줄만 출력. '검색안함'이면 그 한 단어만. 검색어면 키워드만 콤마로. 설명·문장 금지.",
       "",
       "---사건 개요---",
       summary,
@@ -177,17 +175,44 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
 
     const raw = (result as any)?.response?.text?.() ?? "";
     const line = raw.trim().split(/\n/)[0]?.trim() ?? "";
-    if (!line) return null;
+    if (!line) return { query: null, skip: false };
+    if (/검색안함|장난|농담|테스트|의미없|필요없/i.test(line) && line.length < 30) {
+      console.log("[GAEPAN][Judge] 판례 검색 생략(장난/농담 등으로 판단):", line.slice(0, 20));
+      return { query: null, skip: true };
+    }
     const keywords = line
       .split(/[,，\s]+/)
       .map((s: string) => s.trim())
       .filter(Boolean)
       .slice(0, 8);
     const query = keywords.join(" ").slice(0, 100);
-    return query || null;
+    return { query: query || null, skip: false };
   } catch {
-    return null;
+    return { query: null, skip: false };
   }
+}
+
+/** 참조 판례 블록에서 사건번호(2019도12345, 2020다1234 등)만 추출 — 법령 API로 확인된 것만 인용 허용용 */
+function parseAllowedPrecedentCaseNumbers(block: string): Set<string> {
+  const set = new Set<string>();
+  const re = /\d{4}\s*(도|다|가|나)\s*\d+/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(block)) !== null) {
+    set.add(m[0].replace(/\s/g, ""));
+  }
+  return set;
+}
+
+/** rationale/verdict에서 허용 목록에 없는 판례 번호(할루시네이션)를 [인용 생략]으로 치환. allowed가 비어 있으면 모든 판례 번호 제거. */
+function sanitizePrecedentCitations(text: string, allowedCaseNumbers: Set<string>): string {
+  if (!text || !text.trim()) return text;
+  const re = /\d{4}\s*(도|다|가|나)\s*\d+/g;
+  return text.replace(re, (match) => {
+    const normalized = match.replace(/\s/g, "");
+    if (allowedCaseNumbers.size === 0) return "[인용 생략]";
+    if (allowedCaseNumbers.has(normalized)) return match;
+    return "[인용 생략]";
+  });
 }
 
 async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): Promise<JudgeVerdict> {
@@ -277,24 +302,28 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
       ? "재판 목적: 무죄 주장(항변). 검사(나) 측 귀책이 없으면 verdict에 '본 대법관은 피고인에게 다음과 같이 선고한다.'로 시작한 뒤 '피고인 무죄. 불기소.'로 판단하고, ratio는 plaintiff 0 / defendant 100으로 한다."
       : "재판 목적: 유죄 주장(기소). 형법상 범죄이면 징역·사회봉사·벌금 등을, 사소한 일상 갈등이면 '야식 금지', '설거지 3회', '커피 쏘기' 등 구체적 주문만 verdict에 포함하라. verdict에 '유머러스한' 등 메타 표현 쓰지 말 것. 어떤 사연이든 '다음과 같이 선고한다' 뒤에 명확한 결론(주문)을 써라.";
 
-  // 1) 캐시 확인 → 2) 키워드 추출 → 3) 판례 API 검색 (캐시 미스 시). 성공 시 캐시 저장 + 단일어 성공 시 학습
-  const precedentKeywords = await extractPrecedentKeywords(req.title, req.details).catch(() => null);
-  const queryKey = [precedentKeywords ?? "", req.title, req.details.slice(0, 300)].join(" ").trim();
+  // 1) "이 내용과 비슷한 판례 찾아줘" 검색어 추출 (장난/농담이면 skip) → 2) 캐시 확인 → 3) API 검색. 성공 시 캐시·학습
+  const keywordResult = await extractPrecedentKeywords(req.title, req.details).catch(() => ({ query: null, skip: false }));
+  const queryKey = [keywordResult.query ?? "", req.title, req.details.slice(0, 300)].join(" ").trim();
   let precedentBlock: string | null = null;
-  if (supabase) {
-    precedentBlock = await getCachedPrecedents(supabase, queryKey);
-    if (precedentBlock) console.log("[GAEPAN][Judge] 판례 캐시 적중");
-  }
-  if (!precedentBlock) {
-    const preferred = supabase ? await getPreferredKeywords(supabase) : [];
-    precedentBlock = await searchPrecedents(req.title, req.details, 8, precedentKeywords ?? undefined, {
-      preferredSingleWords: preferred,
-      onSingleWordSuccess: supabase ? (k) => learnKeyword(supabase, k) : undefined,
-    });
-    if (precedentBlock && supabase) await setCachedPrecedents(supabase, queryKey, precedentBlock);
+  if (!keywordResult.skip) {
+    if (supabase) {
+      precedentBlock = await getCachedPrecedents(supabase, queryKey);
+      if (precedentBlock) console.log("[GAEPAN][Judge] 판례 캐시 적중");
+    }
+    if (!precedentBlock) {
+      const preferred = supabase ? await getPreferredKeywords(supabase) : [];
+      precedentBlock = await searchPrecedents(req.title, req.details, 8, keywordResult.query ?? undefined, {
+        preferredSingleWords: preferred,
+        onSingleWordSuccess: supabase ? (k) => learnKeyword(supabase, k) : undefined,
+      });
+      if (precedentBlock && supabase) await setCachedPrecedents(supabase, queryKey, precedentBlock);
+    }
   }
   if (precedentBlock) {
-    console.log("[GAEPAN][Judge] 실시간 판례 검색 결과 반영됨", precedentKeywords ? "(AI 키워드 사용)" : "");
+    console.log("[GAEPAN][Judge] 실시간 판례 검색 결과 반영됨", keywordResult.query ? "(AI 검색어 사용)" : "");
+  } else if (keywordResult.skip) {
+    console.log("[GAEPAN][Judge] 참조 판례 미사용 — 장난/농담 등으로 검색 생략.");
   } else {
     console.log("[GAEPAN][Judge] 참조 판례 미사용 — LAW_GO_KR_OC 미설정, API 오류, 또는 검색 0건. 위 [GAEPAN][판례] 로그 확인.");
   }
@@ -315,6 +344,7 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
           precedentBlock,
           "",
           "[필수] 위 '참조 판례' 목록에 있는 대법원 판례 중 최소 1건 이상을 rationale(상세 판결 근거)에 반드시 인용하라. '대법원 20XX. X. X. 선고 20XX도XXXX 판결' 형식으로 적고, 해당 판례의 법리를 본건에 적용한 내용을 rationale에 포함할 것. 선고문에 실제 대법원 판례를 넣지 않으면 안 된다.",
+          "[확정] 위 참조 판례는 국가법령정보센터(법령 API)로 확인된 판례만 포함되어 있다. 이 목록에 없는 판례 번호·사건명을 임의로 만들지 말라. 목록에 없는 판례를 인용하면 출력에서 삭제된다.",
           "",
         ]
       : ["[참조 판례 미제공] 이번 요청에는 참조 판례가 제공되지 않았습니다(API 미연동·오류 등). 구체적인 판례 번호·사건명·선고일자를 임의로 창작하지 말고, 법리와 조문만으로 논증하라.", ""]),
@@ -358,11 +388,13 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
 
     parsed.ratio.rationale = sanitizeVerdictDisplay(parsed.ratio?.rationale ?? "") || (parsed.ratio?.rationale ?? "").trim();
     if (!parsed.ratio.rationale) parsed.ratio.rationale = (parsed.verdict ?? "").trim();
+    const allowedCaseNumbers = precedentBlock ? parseAllowedPrecedentCaseNumbers(precedentBlock) : new Set<string>();
+    parsed.ratio.rationale = sanitizePrecedentCitations(parsed.ratio.rationale, allowedCaseNumbers);
     const verdictSanitized = sanitizeVerdictDisplay(parsed.verdict ?? "");
     if (verdictSanitized === "상세 판결 근거를 불러올 수 없습니다.") {
       parsed.verdict = "본 대법관은 피고인에게 다음과 같이 선고한다. (선고문을 불러올 수 없습니다.)";
     } else {
-      parsed.verdict = (parsed.verdict ?? "").trim();
+      parsed.verdict = sanitizePrecedentCitations((parsed.verdict ?? "").trim(), allowedCaseNumbers);
     }
 
     if (req.trial_type === "DEFENSE" && p2 <= 10) {

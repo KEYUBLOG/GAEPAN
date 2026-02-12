@@ -11,6 +11,7 @@
  */
 
 const LAW_API_BASE = "https://www.law.go.kr/DRF/lawSearch.do";
+const LAW_SERVICE_BASE = "https://www.law.go.kr/DRF/lawService.do";
 /** 대법원 판례만 검색 (org: 400201) */
 const ORG_SUPREME_COURT = "400201";
 
@@ -45,16 +46,20 @@ function parsePrecList(data: unknown): unknown[] {
   return Array.isArray(rawItems) ? rawItems : [];
 }
 
-/** 한 건의 판례에서 사건명·번호·일자·법원 추출 */
-function toRow(p: unknown): { name: string; no: string; date: string; court: string } | null {
+type PrecRow = { name: string; no: string; date: string; court: string; id?: string };
+
+/** 한 건의 판례에서 사건명·번호·일자·법원·일련번호 추출 (상세 API 호출용) */
+function toRow(p: unknown): PrecRow | null {
   const row = p as Record<string, unknown>;
   const name = String(row?.사건명 ?? row?.caseNm ?? "").trim();
   const no = String(row?.사건번호 ?? row?.caseNo ?? "").trim();
   const date = String(row?.선고일자 ?? row?.선고일 ?? row?.jugdDe ?? "").trim();
   const court = String(row?.법원명 ?? row?.courtNm ?? "").trim();
+  const idRaw = row?.판례정보일련번호 ?? row?.precSeq ?? row?.ID ?? row?.id;
+  const id = idRaw != null ? String(idRaw).trim() : undefined;
   const hasName = name.length > 0 && name !== "-";
   const hasIdentifier = no.length > 0 || date.length > 0 || court.length > 0;
-  if (hasName && hasIdentifier) return { name, no, date, court };
+  if (hasName && hasIdentifier) return { name, no, date, court, id: id || undefined };
   return null;
 }
 
@@ -80,6 +85,32 @@ const SINGLE_WORD_QUERIES = [
   "공동정범",
   "불법행위",
 ];
+
+/**
+ * 판례 상세 API로 판시사항·판결요지 조회. 실패 시 null.
+ */
+async function fetchPrecedentDetail(precId: string): Promise<{ 판시사항?: string; 판결요지?: string; 판례내용?: string } | null> {
+  const oc = process.env.LAW_GO_KR_OC?.trim();
+  if (!oc) return null;
+  const url = `${LAW_SERVICE_BASE}?OC=${encodeURIComponent(oc)}&target=prec&type=JSON&ID=${encodeURIComponent(precId)}`;
+  try {
+    const res = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const raw = await res.text();
+    if (!raw?.trim()) return null;
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const 판시사항 = typeof data?.판시사항 === "string" ? data.판시사항.trim() : undefined;
+    const 판결요지 = typeof data?.판결요지 === "string" ? data.판결요지.trim() : undefined;
+    const 판례내용 = typeof data?.판례내용 === "string" ? data.판례내용.trim() : undefined;
+    if (판시사항 || 판결요지 || 판례내용) return { 판시사항, 판결요지, 판례내용 };
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 /** 텍스트에서 SINGLE_WORD_QUERIES 중 포함된 것 최대 3개 반환 (0건 시 단일어 검색용) */
 function pickSingleWordsFromText(text: string): string[] {
@@ -124,7 +155,7 @@ export async function searchPrecedents(
 
   const display = Math.min(Math.max(limit, 15), 20);
   const seen = new Set<string>();
-  const validRows: { name: string; no: string; date: string; court: string }[] = [];
+  const validRows: PrecRow[] = [];
   let singleWordsTried: string[] = [];
   const onSingleWordSuccess = options?.onSingleWordSuccess;
 
@@ -187,12 +218,31 @@ export async function searchPrecedents(
       return null;
     }
 
-    const lines = validRows.slice(0, limit).map((r, i) => {
+    const rowsToShow = validRows.slice(0, limit);
+    const detailCount = 2;
+    const rowsWithDetail = rowsToShow.filter((r) => r.id).slice(0, detailCount);
+    const detailTexts: string[] = [];
+    for (const r of rowsWithDetail) {
+      if (!r.id) continue;
+      const detail = await fetchPrecedentDetail(r.id);
+      if (!detail) continue;
+      const parts: string[] = [];
+      if (detail.판시사항) parts.push(`[판시사항] ${detail.판시사항.slice(0, 1200)}`);
+      if (detail.판결요지) parts.push(`[판결요지] ${detail.판결요지.slice(0, 1200)}`);
+      if (parts.length === 0 && detail.판례내용) parts.push(`[요지] ${detail.판례내용.slice(0, 1200)}`);
+      if (parts.length) detailTexts.push(`${r.name}\n${parts.join("\n")}`);
+    }
+
+    const lines = rowsToShow.map((r, i) => {
       const num = i + 1;
       return `${num}. ${r.name} (${r.court} ${r.date} 선고 ${r.no})`;
     });
-
-    return `---참조 판례 (국가법령정보센터 실시간 검색) ---\n${lines.join("\n")}\n---위 판례를 인용·적용하여 rationale에 논증하라---`;
+    let block = `---참조 판례 (국가법령정보센터 실시간 검색) ---\n${lines.join("\n")}`;
+    if (detailTexts.length > 0) {
+      block += `\n\n---아래 판례 요지(상세) ---\n${detailTexts.join("\n\n")}`;
+    }
+    block += `\n---위 판례를 인용·적용하여 rationale에 논증하라---`;
+    return block;
   } catch {
     return null;
   }
