@@ -435,12 +435,17 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
     parsed.ratio.rationale = sanitizeVerdictDisplay(parsed.ratio?.rationale ?? "") || (parsed.ratio?.rationale ?? "").trim();
     if (!parsed.ratio.rationale) parsed.ratio.rationale = (parsed.verdict ?? "").trim();
     const allowedCaseNumbers = precedentBlock ? parseAllowedPrecedentCaseNumbers(precedentBlock) : new Set<string>();
-    parsed.ratio.rationale = sanitizePrecedentCitations(parsed.ratio.rationale, allowedCaseNumbers);
+    // 판례 블록이 있는데 블록에서 사건번호를 못 뽑으면(allowed 비어 있음) 인용 삭제하지 않음 → 결과가 그대로 보이게
+    const shouldSanitizeCitations = allowedCaseNumbers.size > 0 || !precedentBlock;
+    if (shouldSanitizeCitations) {
+      parsed.ratio.rationale = sanitizePrecedentCitations(parsed.ratio.rationale, allowedCaseNumbers);
+    }
     const verdictSanitized = sanitizeVerdictDisplay(parsed.verdict ?? "");
     if (verdictSanitized === "상세 판결 근거를 불러올 수 없습니다.") {
       parsed.verdict = "본 대법관은 피고인에게 다음과 같이 선고한다. (선고문을 불러올 수 없습니다.)";
     } else {
-      parsed.verdict = sanitizePrecedentCitations((parsed.verdict ?? "").trim(), allowedCaseNumbers);
+      if (shouldSanitizeCitations) parsed.verdict = sanitizePrecedentCitations((parsed.verdict ?? "").trim(), allowedCaseNumbers);
+      else parsed.verdict = (parsed.verdict ?? "").trim();
     }
 
     if (req.trial_type === "DEFENSE" && p2 <= 10) {
