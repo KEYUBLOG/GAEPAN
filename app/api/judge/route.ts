@@ -203,7 +203,7 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     const keywordList = keywordLine
       .split(/[,，]/)
       .map((s: string) => s.trim())
-      .filter((w) => w.length >= 2 && !/^\d{4}\s*(도|다|가|나)\s*\d+$/.test(w.replace(/\s/g, "")))
+      .filter((w: string) => w.length >= 2 && !/^\d{4}\s*(도|다|가|나)\s*\d+$/.test(w.replace(/\s/g, "")))
       .slice(0, 5);
     const query = filteredNames.length > 0 ? filteredNames[0].slice(0, 100) : null;
     return { query: query ?? null, queryList: filteredNames, keywordList, skip: false, caseType: null, defendantWronged: false };
