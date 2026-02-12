@@ -161,15 +161,18 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     if (!summary) return { query: null, skip: false, caseType: null, defendantWronged: false };
 
     const prompt = [
-      "아래는 이용자가 올린 사건 개요(제목·경위)이다. '이 내용과 비슷한 사건 몇 가지'를 먼저 골라라. 그 사건명으로 '(사건명) 판례' 검색을 해서 대법원 판례를 찾을 것이다.",
+      "아래 사건과 유사한 대법원 판례를 찾기 위해, 그 판례를 '사건명(사람들이 부르는 이름)'으로만 나열하라. 법령정보 API로 해당 사건 판례를 직접 검색할 것이다.",
+      "",
+      "【중요】 판례 '번호'는 절대 쓰지 말라. 2010도13410, 2020다12345, 2019가합1234 같은 숫자+도/다/가/나 형식은 모두 금지. AI가 지어낸 번호는 거짓이므로, 반드시 '여우고개 사건', '군무이탈 당번병 사건', 'OOO 사건' 처럼 사건을 부르는 한글 이름만 적을 것.",
       "",
       "1) 장난·농담·테스트·허위·의미없는 글이면 '검색안함' 한 단어만 출력하라.",
-      "2) 진지한 사건이면 반드시 아래 세 줄을 순서대로 출력하라 (한 줄에 한 항목):",
-      "   첫째 줄: 사건 유형 한 줄 (예: 군무이탈·탈영, 사기죄, 명예훼손, 손해배상, 상해, 협박, 일상 갈등 등). 본문이 말하는 '이건 어떤 사건인지'만 적을 것.",
-      "   둘째 줄: 본문과 비슷한 대법원 사건명(또는 쟁점을 한 단어~몇 단어로) 3~5개, 콤마(,)로만 구분. 예: 군무이탈, 당번병 부대이탈, 탈영, 관사당번병, 무단이탈 / 또는 사기, 금원편취, 배임 / 명예훼손, 사실적시. (이 사건명들로 'OOO 판례' 검색을 하므로, 판례 검색에 잘 걸릴 사건명·쟁점명만 적을 것.)",
-      "   셋째 줄: 피고인(피고 측)이 억울해 보이면 '억울함', 아니면 '정상'.",
+      "2) 진지한 사건이면 반드시 아래 네 줄만 순서대로 출력하라. (한 줄에 한 항목)",
+      "   첫째 줄: 사건 유형 한 줄. 예: 군무이탈·탈영, 사기죄, 명예훼손 등.",
+      "   둘째 줄: 이 사건과 유사한 대법원 판례를 '사건명(한글 이름)'으로만 3~5개, 콤마(,)로 구분. 예: 여우고개 사건, 군무이탈 당번병 사건, 관사당번병 부대이탈 사건, 탈영 무죄 사건. (판례 번호·2010도XXXX 형식 절대 금지. 사건명만)",
+      "   셋째 줄: 위 중 본건과 가장 유사한 사건 하나만 '가장유사: 사건명' 형식. 예: 가장유사: 군무이탈 당번병 부대이탈 사건",
+      "   넷째 줄: 피고인(피고 측)이 억울해 보이면 '억울함', 아니면 '정상'.",
       "",
-      "규칙: 검색안함이면 한 줄만. 그 외에는 정확히 세 줄. 설명·추가 문장 금지.",
+      "규칙: 검색안함이면 한 줄만. 그 외에는 정확히 네 줄. 사건번호(도/다/가/나+숫자) 출력 금지. 한글 사건명만.",
       "",
       "---사건 개요---",
       summary,
@@ -179,7 +182,7 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     const result = await Promise.race([
       model.generateContent({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 200 },
+        generationConfig: { temperature: 0.2, maxOutputTokens: 280 },
       } as any),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 10000)),
     ]);
@@ -199,13 +202,19 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
       .map((s: string) => s.trim())
       .filter(Boolean)
       .slice(0, 5);
-    // "(AI가 알려준 사건명)+판례" 로 검색해 해당 사건에 대한 판례를 API로 정확히 가져옴
-    const query =
-      similarCaseNames.length > 0
-        ? similarCaseNames.map((name) => `${name} 판례`).join(" ").slice(0, 120)
+    const thirdLine = lines[2] ?? "";
+    const mostSimilarMatch = thirdLine.match(/가장유사\s*:\s*(.+)/i) || thirdLine.match(/가장유사\s*(.+)/i);
+    let mostSimilarTitle = mostSimilarMatch ? mostSimilarMatch[1].trim().slice(0, 80) : null;
+    if (mostSimilarTitle && /^\d{4}\s*(도|다|가|나)\s*\d+$/.test(mostSimilarTitle.replace(/\s/g, ""))) mostSimilarTitle = null;
+    const fourth = (lines[3] ?? lines[2] ?? "").toLowerCase();
+    const defendantWronged = /억울|무혐의|오인|착오|잘못\s*기소|혐의\s*없/i.test(fourth) || fourth.includes("억울함");
+    const filteredNames = similarCaseNames.filter((n) => !/^\d{4}\s*(도|다|가|나)\s*\d+$/.test(n.replace(/\s/g, "")));
+    const primaryTitle = (mostSimilarTitle && mostSimilarTitle.length > 0 ? mostSimilarTitle : null) ?? filteredNames[0] ?? null;
+    const query = primaryTitle
+      ? `${primaryTitle} 판례`.slice(0, 100)
+      : filteredNames.length > 0
+        ? filteredNames.map((name) => `${name} 판례`).join(" ").slice(0, 120)
         : null;
-    const third = (lines[2] ?? "").toLowerCase();
-    const defendantWronged = /억울|무혐의|오인|착오|잘못\s*기소|혐의\s*없/i.test(third) || third.includes("억울함");
     return { query: query ?? null, skip: false, caseType, defendantWronged };
   } catch {
     return { query: null, skip: false, caseType: null, defendantWronged: false };
