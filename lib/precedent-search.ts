@@ -137,6 +137,9 @@ function toRow(p: unknown): PrecRow | null {
   return null;
 }
 
+/** 본문과 유사도가 이 점수 미만이면 참조 판례 블록에 넣지 않음 (전혀 다른 판례 제외) */
+const MIN_RELEVANCE_SCORE = 3;
+
 /** queryList 검색 0건이고 본문에서 단일어를 못 뽑았을 때 시도할 기본 단일어 (군사·일반) */
 const DEFAULT_FALLBACK_SINGLE_WORDS = ["탈영", "군무이탈", "형법"];
 
@@ -421,7 +424,13 @@ export async function searchPrecedents(
       const scoreB = contentScoreMap.get(keyB) ?? nameScore(b);
       return scoreB - scoreA;
     });
-    const rowsToShow = sorted.slice(0, limit);
+    const getScore = (r: PrecRowWithSource) => contentScoreMap.get(`${r.no}|${r.name}`) ?? nameScore(r);
+    const similarOnly = sorted.filter((r) => getScore(r) >= MIN_RELEVANCE_SCORE);
+    if (similarOnly.length === 0) {
+      console.log("[GAEPAN][판례] 본문과 유사한 판례 없음(최소 점수 미달) — 참조 판례 블록 생략");
+      return null;
+    }
+    const rowsToShow = similarOnly.slice(0, limit);
     const detailCount = 2;
     const rowsWithDetail = rowsToShow.filter((r) => r.id).slice(0, detailCount);
     const detailTexts: string[] = [];
