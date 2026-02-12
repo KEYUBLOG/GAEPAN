@@ -1452,7 +1452,7 @@ function HallOfFameContent() {
                         ⚖️ 최종 선고
                       </div>
                       <p className="mt-1 text-xs text-zinc-500">
-                        이 사건에 대한 최종 선고와 그 근거입니다. 유사 판례(국가법령정보센터)를 참조해 작성될 수 있습니다.
+                        이 사건에 대한 최종 선고와 그 근거입니다. 유사 판례는 국가법령정보센터 법령 API로 검색·반영됩니다.
                       </p>
                     </div>
                     <div

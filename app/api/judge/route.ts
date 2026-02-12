@@ -210,10 +210,11 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     const defendantWronged = /억울|무혐의|오인|착오|잘못\s*기소|혐의\s*없/i.test(fourth) || fourth.includes("억울함");
     const filteredNames = similarCaseNames.filter((n: string) => !/^\d{4}\s*(도|다|가|나)\s*\d+$/.test(n.replace(/\s/g, "")));
     const primaryTitle = (mostSimilarTitle && mostSimilarTitle.length > 0 ? mostSimilarTitle : null) ?? filteredNames[0] ?? null;
+    // 법령 사이트처럼 '사건명'만 넣어서 검색 (여우고개 사건 → API에서 해당 판례 나오게). ' 판례' 붙이면 오히려 0건 나올 수 있음
     const query = primaryTitle
-      ? `${primaryTitle} 판례`.slice(0, 100)
+      ? primaryTitle.slice(0, 100)
       : filteredNames.length > 0
-        ? filteredNames.map((name: string) => `${name} 판례`).join(" ").slice(0, 120)
+        ? filteredNames.slice(0, 2).join(" ").slice(0, 100)
         : null;
     return { query: query ?? null, skip: false, caseType, defendantWronged };
   } catch {

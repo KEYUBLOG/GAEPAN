@@ -84,6 +84,8 @@ const SINGLE_WORD_QUERIES = [
   "정당방위",
   "공동정범",
   "불법행위",
+  "탈영",
+  "군무이탈",
 ];
 
 /**
@@ -237,7 +239,7 @@ export async function searchPrecedents(
       const num = i + 1;
       return `${num}. ${r.name} (${r.court} ${r.date} 선고 ${r.no})`;
     });
-    let block = `---참조 판례 (국가법령정보센터 실시간 검색) ---\n${lines.join("\n")}`;
+    let block = `---참조 판례 (국가법령정보센터 법령 API 실시간 검색) ---\n${lines.join("\n")}`;
     if (detailTexts.length > 0) {
       block += `\n\n---아래 판례 요지(상세) ---\n${detailTexts.join("\n\n")}`;
     }
