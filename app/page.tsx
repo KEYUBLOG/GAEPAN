@@ -32,6 +32,7 @@ import { maskCommentIp } from "@/lib/comment";
 import { useBlockedKeywords } from "@/lib/useBlockedKeywords";
 import { parseImageUrls } from "@/lib/image-urls";
 import { sanitizeVerdictDisplay, sanitizeCaseContentDisplay } from "@/lib/sanitize-verdict-display";
+import { getPrimaryLabelFromVerdictAndRatio, getConclusionFromVerdictText } from "@/lib/verdict-conclusion";
 
 const TRIAL_DURATION_MS = 24 * 60 * 60 * 1000;
 const URGENT_THRESHOLD_MS = 3 * 60 * 60 * 1000;
@@ -2481,14 +2482,17 @@ function HomeContent() {
                       </div>
                       <div className="mt-2 text-sm md:text-base font-bold leading-relaxed">
                         {(() => {
-                          const def = Number(judgeResult.verdict.ratio?.defendant) ?? 50;
-                          if (def === 50) {
+                          const label = getPrimaryLabelFromVerdictAndRatio(
+                            judgeResult.verdict.verdict,
+                            judgeResult.verdict.ratio?.defendant,
+                            judgeResult.verdict.ratio?.rationale
+                          );
+                          if (label === "판결 유보") {
                             return <span className="text-amber-200">판결 유보 : 판단 불가</span>;
                           }
-                          const isGuilty = def > 50;
                           return (
-                            <span className={isGuilty ? "text-red-300" : "text-blue-300"}>
-                              피고인 {isGuilty ? "유죄" : "무죄"}
+                            <span className={label === "유죄" ? "text-red-300" : "text-blue-300"}>
+                              피고인 {label}
                             </span>
                           );
                         })()}
@@ -3691,15 +3695,16 @@ function HomeContent() {
               {/* 섹션 2: ⚖️ 최종 선고 - 메인 영역 */}
               {(() => {
                 const isFinished = !isVotingOpen(selectedPost.created_at, selectedPost.voting_ended_at);
-                const aiRatio = selectedPost.ratio ?? 50;
                 const verdictText = typeof selectedPost.verdict === "string" ? selectedPost.verdict : "";
+                const rationaleForLabel = selectedPost.verdict_rationale ?? (selectedPost as Record<string, unknown>).verdictRationale ?? "";
+                const primaryLabel = getPrimaryLabelFromVerdictAndRatio(verdictText, selectedPost.ratio, typeof rationaleForLabel === "string" ? rationaleForLabel : "");
+                const isFiftyFifty = primaryLabel === "판결 유보";
+                const aiRatio = selectedPost.ratio ?? 50;
                 const isDefense =
                   selectedPost.trial_type === "DEFENSE" ||
                   ((verdictText.includes("피고인 무죄") || verdictText.includes("불기소") || verdictText.includes("원고 무죄")) && selectedPost.trial_type !== "ACCUSATION");
                 const notGuiltyPct = isDefense ? aiRatio : 100 - aiRatio;
                 const guiltyPct = isDefense ? 100 - aiRatio : aiRatio;
-                const isFiftyFifty = guiltyPct === 50 && notGuiltyPct === 50;
-                const primaryLabel = guiltyPct >= notGuiltyPct ? "유죄" : "무죄";
 
                 return (
                   <section className="space-y-4" aria-label="최종 선고">
@@ -3775,8 +3780,11 @@ function HomeContent() {
                           (selectedPost as Record<string, unknown>).verdictRationale ??
                           "";
                         const rationale = typeof raw === "string" ? raw : "";
+                        const verdictShort = typeof selectedPost.verdict === "string" ? selectedPost.verdict : "";
                         const displayText =
-                          sanitizeVerdictDisplay(rationale) || "상세 판결 근거가 기록되지 않은 사건입니다. 이전 버전에서 작성된 사건이거나 기록이 누락되었을 수 있습니다.";
+                          sanitizeVerdictDisplay(rationale) ||
+                          sanitizeVerdictDisplay(verdictShort) ||
+                          "상세 판결 근거가 기록되지 않은 사건입니다. 이전 버전에서 작성된 사건이거나 기록이 누락되었을 수 있습니다.";
                         return (
                           <div className="mt-3 md:mt-4">
                             <div className="text-[11px] sm:text-xs font-semibold text-amber-100/90 mb-1">
@@ -3886,9 +3894,17 @@ function HomeContent() {
                     const total = selectedPost.guilty + selectedPost.not_guilty;
                     const juryGuiltyPct = total ? Math.round((selectedPost.guilty / total) * 100) : 50;
                     const juryNotGuiltyPct = total ? 100 - juryGuiltyPct : 50;
+                    const verdictText = typeof selectedPost.verdict === "string" ? selectedPost.verdict : "";
+                    const aiConclusion = getConclusionFromVerdictText(verdictText);
                     const aiDefendantPct = selectedPost.ratio ?? 50;
-                    const aiPlaintiffPct = 100 - aiDefendantPct;
-                    const aiVerdict = aiDefendantPct >= 50 ? "유죄" : "무죄";
+                    const aiVerdict =
+                      aiConclusion === "guilty"
+                        ? "유죄"
+                        : aiConclusion === "not_guilty"
+                          ? "무죄"
+                          : aiDefendantPct >= 50
+                            ? "유죄"
+                            : "무죄";
                     const aiPct = aiDefendantPct >= 50 ? aiDefendantPct : 100 - aiDefendantPct;
                     const juryVerdict = juryGuiltyPct >= 50 ? "유죄" : "무죄";
                     const juryPct = juryGuiltyPct >= 50 ? juryGuiltyPct : juryNotGuiltyPct;

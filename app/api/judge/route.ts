@@ -130,7 +130,7 @@ const GEMINI_MAX_RETRIES = 2; // 최초 1회 + 재시도 2회 = 총 3회
 const GEMINI_RETRY_DELAY_MS = 1500;
 
 /**
- * 사건 본문(제목+경위)을 분석해, 유사 판례를 찾을 때 쓸 검색 키워드(법적 쟁점·죄명 등)를 추출.
+ * 사건 본문(제목+경위)을 분석해, 대법원 판례 검색에 쓸 검색 키워드(죄명·법적 쟁점 등)를 추출.
  * 실패 시 null 반환. Judge에서 판례 검색 전에 호출해 queryOverride로 넘긴다.
  */
 async function extractPrecedentKeywords(title: string, details: string): Promise<string | null> {
@@ -141,13 +141,19 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: modelName });
 
-    const summary = [title, details].filter(Boolean).join("\n").trim().slice(0, 1500);
+    const summary = [title, details].filter(Boolean).join("\n").trim().slice(0, 2000);
     if (!summary) return null;
 
     const prompt = [
-      "아래는 이용자가 제기한 사건 개요(제목과 경위)이다. 이 사건과 유사한 판례를 찾을 때 사용할 검색 키워드를 추출하라.",
-      "키워드는 법적 쟁점·죄명·민형사 개념 등 판례 검색에 적합한 한글 용어 3~5개로 한다. 예: 명예훼손, 손해배상, 불법행위, 모욕죄, 배임, 사기.",
-      "설명 없이 키워드만 한 줄에 콤마(,)로 구분해 출력하라. 사건 내용과 무관한 일반어는 쓰지 마라.",
+      "당신은 대한민국 대법원 판례 검색에 최적화된 키워드를 추출하는 전문가이다.",
+      "아래 사건 개요(제목·경위)를 읽고, 국가법령정보센터(law.go.kr) 판례 검색에서 대법원 판례를 확실히 찾을 수 있도록 검색어를 추출하라.",
+      "",
+      "반드시 포함할 것:",
+      "1) 형법·특별법상 죄명·죄목: 사건 내용이 해당하면 반드시 넣을 것. 예: 살인, 상해, 과실치사, 사기, 배임, 횡령, 절도, 강도, 협박, 모욕, 명예훼손, 스토킹, 성폭력, 교통사고, 업무상과실, 주거침입, 손괴 등.",
+      "2) 법적 쟁점·구성요건: 정당방위, 과실, 고의, 공동정범, 교사, 방조, 미수, 착오, 위법성조각, 부작위, 인과관계, 손해배상, 불법행위, 채무불이행 등.",
+      "3) 사건 상황을 대법원 판례 요지에서 쓰는 한글 용어로: 예 금원 편취, 재산상 손해, 신뢰 관계, 배임행위, 폭행, 협박, 명예 훼손, 사실 적시 등.",
+      "",
+      "규칙: 한글만 사용. 대법원 판례 제목·요지에 실제로 나오는 법률 용어를 우선한다. 5~8개 키워드를 콤마(,)로 구분해 한 줄로만 출력하라. 설명·문장 금지. 사건과 무관한 키워드는 넣지 마라.",
       "",
       "---사건 개요---",
       summary,
@@ -157,21 +163,20 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     const result = await Promise.race([
       model.generateContent({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 80 },
+        generationConfig: { temperature: 0.15, maxOutputTokens: 120 },
       } as any),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 6000)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 8000)),
     ]);
 
     const raw = (result as any)?.response?.text?.() ?? "";
     const line = raw.trim().split(/\n/)[0]?.trim() ?? "";
     if (!line) return null;
-    // 콤마/공백으로 나누고 앞 5개만, 80자 이내로
     const keywords = line
       .split(/[,，\s]+/)
       .map((s: string) => s.trim())
       .filter(Boolean)
-      .slice(0, 5);
-    const query = keywords.join(" ").slice(0, 80);
+      .slice(0, 8);
+    const query = keywords.join(" ").slice(0, 100);
     return query || null;
   } catch {
     return null;
@@ -202,7 +207,8 @@ async function callGemini(req: JudgeRequest): Promise<JudgeVerdict> {
     "- 판례 인용 시: 이번 요청에 '참조 판례' 블록으로 제공된 목록에 있는 판례만 인용할 수 있다. 블록에 없는 판례 번호(예: 대법원 20XX도XXXX), 사건명, 선고일자, 법원명을 절대 꾸며 내지 말라. 참조 판례가 제공되지 않았으면 구체적 판례를 인용하지 말고 법리·조문만으로 논증하라.",
     "- 존재하지 않는 조문 번호·판례 번호·통계·연구 결과를 만들지 말라. 확실히 아는 형법·특별법 조문만 언급하라.",
     "",
-    "rationale(상세 판결) 규칙:",
+    "rationale(상세 판결) 규칙(필수):",
+    "- ratio.rationale 필드는 절대 비워 두지 말라. 반드시 2문장 이상의 상세 판결 근거(사실관계·법리·결론)를 작성하라. 빈 문자열·생략·누락 금지. 이 필드가 비어 있으면 출력이 사용되지 않는다.",
     "- rationale에는 판단 근거(사실관계·고의/과실 분석)와 함께 최종 선고 내용을 반드시 포함하라.",
     "- 형법상 범죄가 인정될 때: '징역 n년', '징역 n개월', '집행유예', '사회봉사 n시간', '벌금 n원' 등 형량을 rationale 끝에 명시하라. 징역형에 집행유예를 부가할 때는 반드시 '징역 n년(또는 n개월) 집행유예 n년에 처한다' 또는 '징역 n년에 처하고, 그 형의 집행을 n년 간 유예한다'처럼 징역형과 집행유예 기간을 모두 명시하라.",
     "- 형법상 범죄가 아닌 사소한 잘못·일상 갈등일 때: 징역·벌금 대신 '야식 금지 1주', '설거지 3회 실시', '커피 한 잔 쏘기', '진심 어린 사과 1회' 등 구체적 가벼운 주문만 선고하라. 선고문에 '유머러스한' 같은 단어는 쓰지 말 것.",
@@ -246,8 +252,9 @@ async function callGemini(req: JudgeRequest): Promise<JudgeVerdict> {
     "",
     "반환 JSON 스키마 (키 이름 변경 금지):",
     '{ "title": string, "ratio": { "plaintiff": number, "defendant": number, "rationale": string }, "verdict": string }',
+    "- rationale: 필수. 비어 있으면 안 된다. 상세 판결 근거 전문(2문장 이상)을 반드시 채울 것.",
     "",
-    "제약: ratio는 정수, 합 100. 입력에 없는 개인정보를 창작하지 마라. 위 '할루시네이션 금지'를 위반한 출력은 사용되지 않는다.",
+    "제약: ratio는 정수, 합 100. rationale은 반드시 비어 있지 않은 문자열. 입력에 없는 개인정보를 창작하지 마라. 위 '할루시네이션 금지'를 위반한 출력은 사용되지 않는다.",
   ].join("\n");
 
   const model = genAI.getGenerativeModel({
@@ -320,6 +327,7 @@ async function callGemini(req: JudgeRequest): Promise<JudgeVerdict> {
     parsed.ratio.defendant = d2;
 
     parsed.ratio.rationale = sanitizeVerdictDisplay(parsed.ratio?.rationale ?? "") || (parsed.ratio?.rationale ?? "").trim();
+    if (!parsed.ratio.rationale) parsed.ratio.rationale = (parsed.verdict ?? "").trim();
     const verdictSanitized = sanitizeVerdictDisplay(parsed.verdict ?? "");
     if (verdictSanitized === "상세 판결 근거를 불러올 수 없습니다.") {
       parsed.verdict = "본 대법관은 피고인에게 다음과 같이 선고한다. (선고문을 불러올 수 없습니다.)";
@@ -334,6 +342,27 @@ async function callGemini(req: JudgeRequest): Promise<JudgeVerdict> {
       parsed.verdict = `${prefix}피고인 무죄. 불기소. 과실비율은 검사 0% / 피고인 100%로 정한다.`;
     } else if (parsed.verdict && !parsed.verdict.trimStart().startsWith("본 대법관은")) {
       parsed.verdict = "본 대법관은 피고인에게 다음과 같이 선고한다. " + parsed.verdict.trimStart();
+    }
+
+    // 선고문(verdict)과 ratio 불일치 정합성: 주문(verdict)이 무죄/유죄로 명확하면 ratio를 그에 맞춤
+    const verdictOnly = (parsed.verdict ?? "").trim();
+    const saysNotGuiltyInVerdict = /피고인\s*무죄|불기소|원고\s*무죄/i.test(verdictOnly);
+    const hasGuiltyOrderInVerdict = /유죄\s*\.|징역\s*\d|벌금\s*\d|사회봉사\s*\d|집행유예/i.test(verdictOnly);
+    if (saysNotGuiltyInVerdict && !hasGuiltyOrderInVerdict) {
+      // 주문이 무죄인데 ratio가 유죄(피고인 과실 50 초과)로 나왔으면 ratio·주문을 무죄로 통일
+      if (parsed.ratio.defendant > 50) {
+        parsed.ratio.plaintiff = 0;
+        parsed.ratio.defendant = 100;
+        const prefix = verdictOnly.startsWith("본 대법관은") ? "" : "본 대법관은 피고인에게 다음과 같이 선고한다. ";
+        parsed.verdict = (prefix + "피고인 무죄. 불기소. 과실비율은 검사 0% / 피고인 100%로 정한다.").trim();
+        if (!parsed.verdict.startsWith("본 대법관은")) parsed.verdict = "본 대법관은 피고인에게 다음과 같이 선고한다. " + parsed.verdict;
+      }
+    } else if (hasGuiltyOrderInVerdict && !saysNotGuiltyInVerdict) {
+      // 주문이 유죄(형량·유죄 명시)인데 ratio가 무죄(피고인 과실 50 미만)로 나왔으면 ratio만 유죄 쪽으로 통일
+      if (parsed.ratio.defendant < 50) {
+        parsed.ratio.plaintiff = 20;
+        parsed.ratio.defendant = 80;
+      }
     }
 
     // '다음과 같이 선고한다' 뒤 주문(결론) 누락 시 보완
@@ -518,7 +547,11 @@ export async function POST(request: Request) {
         : 1;
 
     const rationaleToSave =
-      typeof verdict.ratio?.rationale === "string" ? verdict.ratio.rationale : null;
+      (typeof verdict.ratio?.rationale === "string" && verdict.ratio.rationale.trim())
+        ? verdict.ratio.rationale.trim()
+        : (typeof verdict.verdict === "string" && verdict.verdict.trim())
+          ? verdict.verdict.trim()
+          : null;
     console.log("[GAEPAN][POST /api/judge] inserting post into DB", {
       caseNumberCandidate: nextCaseNumber,
       ratioDefendant: verdict.ratio.defendant,
