@@ -201,6 +201,8 @@ function HomeContent() {
     verdict: JudgeVerdict;
     imageUrl?: string | null;
     imageUrls?: string[];
+    /** 판례 검색(법령 API) 사용 여부 — true면 참조 판례 반영됨 */
+    precedent_used?: boolean;
   } | null>(null);
   const [createdPostId, setCreatedPostId] = useState<string | null>(null);
   const [judgeError, setJudgeError] = useState<string | null>(null);
@@ -1189,6 +1191,7 @@ function HomeContent() {
         verdict: verdictPayload,
         imageUrl: imageUrls.length > 0 ? imageUrls[0] : null,
         imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
+        precedent_used: (data as any).precedent_used ?? false,
       });
       const pid =
         (data && "post_id" in data && (data as any).post_id) ? String((data as any).post_id) : null;
@@ -2408,7 +2411,7 @@ function HomeContent() {
                 <div ref={verdictDetailRef} className="rounded-[2rem] border border-zinc-800 bg-zinc-950/60 p-5 md:p-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <div className="inline-flex items-center gap-2 text-xs font-black tracking-widest uppercase">
+                      <div className="inline-flex flex-wrap items-center gap-2 text-xs font-black tracking-widest uppercase">
                         <span className="text-amber-500">판결문</span>
                         {judgeResult.mock ? (
                           <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-200">
@@ -2419,6 +2422,9 @@ function HomeContent() {
                             LIVE
                           </span>
                         )}
+                        <span className="rounded-full border border-zinc-600 bg-zinc-800/80 px-2 py-0.5 text-zinc-400" title="참조 판례 검색 여부">
+                          {judgeResult.precedent_used ? "판례 검색됨" : "판례 미사용"}
+                        </span>
                       </div>
                     </div>
                     <button

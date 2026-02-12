@@ -138,10 +138,10 @@ const GEMINI_RETRY_DELAY_MS = 1500;
 
 export type PrecedentKeywordResult = {
   query: string | null;
+  /** AI가 준 유사 사건 명칭 전부 — 각각 따로 법령 API 검색함 */
+  queryList: string[];
   skip: boolean;
-  /** 본문 기준 '어떤 사건인지' (사기, 명예훼손, 손해배상 등) — 그 사건 유형에 대한 판례를 검색하기 위함 */
   caseType: string | null;
-  /** 피고인이 억울해 보이는 사건이면 true → 무죄·형량 최소 유도 */
   defendantWronged: boolean;
 };
 
@@ -158,23 +158,17 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     const model = genAI.getGenerativeModel({ model: modelName });
 
     const summary = [title, details].filter(Boolean).join("\n").trim().slice(0, 2000);
-    if (!summary) return { query: null, skip: false, caseType: null, defendantWronged: false };
+    if (!summary) return { query: null, queryList: [], skip: false, caseType: null, defendantWronged: false };
 
     const prompt = [
-      "아래 본문 내용을 보고, 이와 유사한 사건 몇 가지를 추려서 **정확한 사건 명칭**만 알려줘.",
+      "아래 본문 내용을 보고, 이와 유사한 사건의 **정확한 사건 명칭**만 한 줄로 알려줘.",
       "",
-      "그 정확한 명칭을 법령정보 API에 그대로 검색하면 판례가 나온다. 예: '관사 당번병 무단이탈 사건'이라고 적으면, API에서 '관사 당번병 무단이탈 사건'으로 검색해 해당 판례를 가져온다. 따라서 반드시 실제 판례·법조계에서 쓰는 **정확한 사건 명칭**만 적을 것.",
-      "",
-      "【금지】 판례 번호(2010도13410, 2020다12345 등 숫자+도/다/가/나)는 절대 쓰지 말 것. 한글 사건명만.",
+      "그 명칭을 법령정보 API에 그대로 검색하면 판례가 나온다. 실제 판례·법조계에서 쓰는 정확한 사건 명칭만 적을 것. 【금지】 판례 번호(2010도13410 등)는 쓰지 말 것. 한글 사건명만.",
       "",
       "1) 장난·농담·테스트·허위·의미없는 글이면 '검색안함' 한 단어만 출력하라.",
-      "2) 진지한 사건이면 반드시 아래 네 줄만 순서대로 출력하라.",
-      "   첫째 줄: 사건 유형 한 줄. 예: 군무이탈·탈영, 사기죄, 명예훼손 등.",
-      "   둘째 줄: 본문과 유사한 사건의 **정확한 사건 명칭** 3~5개, 콤마(,)로 구분. 예: 관사 당번병 무단이탈 사건, 여우고개 사건, 군무이탈 당번병 부대이탈 사건. (API 검색에 그대로 쓸 명칭이므로 정확히)",
-      "   셋째 줄: 위 중 본건과 가장 유사한 사건 하나만 '가장유사: 정확한 사건 명칭' 형식. 예: 가장유사: 관사 당번병 무단이탈 사건",
-      "   넷째 줄: 피고인(피고 측)이 억울해 보이면 '억울함', 아니면 '정상'.",
+      "2) 진지한 사건이면 본문과 유사한 사건의 정확한 사건 명칭 3~5개만 콤마(,)로 구분해 한 줄로 출력. 예: 관사 당번병 무단이탈 사건, 여우고개 사건, 군무이탈 당번병 부대이탈 사건",
       "",
-      "규칙: 검색안함이면 한 줄만. 그 외에는 정확히 네 줄. 정확한 사건 명칭만 적으면 API 검색으로 판례가 나온다.",
+      "규칙: 출력은 한 줄만. 검색안함이면 그 한 단어만, 아니면 사건 명칭만 콤마로.",
       "",
       "---사건 개요(본문)---",
       summary,
@@ -184,43 +178,28 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     const result = await Promise.race([
       model.generateContent({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 280 },
+        generationConfig: { temperature: 0.2, maxOutputTokens: 180 },
       } as any),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 10000)),
     ]);
 
     const raw = (result as any)?.response?.text?.() ?? "";
-    const lines = raw.trim().split(/\n/).map((l: string) => l.trim()).filter(Boolean);
-    const first = lines[0] ?? "";
-    if (!first) return { query: null, skip: false, caseType: null, defendantWronged: false };
-    if (/검색안함|장난|농담|테스트|의미없|필요없/i.test(first) && first.length < 30) {
-      console.log("[GAEPAN][Judge] 판례 검색 생략(장난/농담 등으로 판단):", first.slice(0, 20));
-      return { query: null, skip: true, caseType: null, defendantWronged: false };
+    const line = raw.trim().split(/\n/).map((l: string) => l.trim()).filter(Boolean)[0] ?? "";
+    if (!line) return { query: null, queryList: [], skip: false, caseType: null, defendantWronged: false };
+    if (/검색안함|장난|농담|테스트|의미없|필요없/i.test(line) && line.length < 30) {
+      console.log("[GAEPAN][Judge] 판례 검색 생략(장난/농담 등으로 판단):", line.slice(0, 20));
+      return { query: null, queryList: [], skip: true, caseType: null, defendantWronged: false };
     }
-    const caseType = first.slice(0, 80).trim() || null;
-    const second = lines[1] ?? "";
-    const similarCaseNames = second
+    const similarCaseNames = line
       .split(/[,，]/)
       .map((s: string) => s.trim())
       .filter(Boolean)
       .slice(0, 5);
-    const thirdLine = lines[2] ?? "";
-    const mostSimilarMatch = thirdLine.match(/가장유사\s*:\s*(.+)/i) || thirdLine.match(/가장유사\s*(.+)/i);
-    let mostSimilarTitle = mostSimilarMatch ? mostSimilarMatch[1].trim().slice(0, 80) : null;
-    if (mostSimilarTitle && /^\d{4}\s*(도|다|가|나)\s*\d+$/.test(mostSimilarTitle.replace(/\s/g, ""))) mostSimilarTitle = null;
-    const fourth = (lines[3] ?? lines[2] ?? "").toLowerCase();
-    const defendantWronged = /억울|무혐의|오인|착오|잘못\s*기소|혐의\s*없/i.test(fourth) || fourth.includes("억울함");
     const filteredNames = similarCaseNames.filter((n: string) => !/^\d{4}\s*(도|다|가|나)\s*\d+$/.test(n.replace(/\s/g, "")));
-    const primaryTitle = (mostSimilarTitle && mostSimilarTitle.length > 0 ? mostSimilarTitle : null) ?? filteredNames[0] ?? null;
-    // 법령 사이트처럼 '사건명'만 넣어서 검색 (여우고개 사건 → API에서 해당 판례 나오게). ' 판례' 붙이면 오히려 0건 나올 수 있음
-    const query = primaryTitle
-      ? primaryTitle.slice(0, 100)
-      : filteredNames.length > 0
-        ? filteredNames.slice(0, 2).join(" ").slice(0, 100)
-        : null;
-    return { query: query ?? null, skip: false, caseType, defendantWronged };
+    const query = filteredNames.length > 0 ? filteredNames[0].slice(0, 100) : null;
+    return { query: query ?? null, queryList: filteredNames, skip: false, caseType: null, defendantWronged: false };
   } catch {
-    return { query: null, skip: false, caseType: null, defendantWronged: false };
+    return { query: null, queryList: [], skip: false, caseType: null, defendantWronged: false };
   }
 }
 
@@ -247,7 +226,7 @@ function sanitizePrecedentCitations(text: string, allowedCaseNumbers: Set<string
   });
 }
 
-async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): Promise<JudgeVerdict> {
+async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): Promise<{ verdict: JudgeVerdict; precedent_used: boolean }> {
   assertGeminiEnv();
   const apiKey = process.env.GEMINI_API_KEY!;
   const modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
@@ -338,11 +317,12 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
   // 1) 본문으로 '어떤 사건인지' 파악 + 그 사건 유형에 대한 판례 검색어 추출 (장난/농담이면 skip) → 2) 캐시 → 3) API 검색
   const keywordResult = await extractPrecedentKeywords(req.title, req.details).catch(() => ({
     query: null,
+    queryList: [],
     skip: false,
     caseType: null,
     defendantWronged: false,
   }));
-  const queryKey = [keywordResult.query ?? "", keywordResult.caseType ?? "", req.title, req.details.slice(0, 300)].join(" ").trim();
+  const queryKey = [keywordResult.queryList.length > 0 ? keywordResult.queryList.join(" ") : keywordResult.query ?? "", keywordResult.caseType ?? "", req.title, req.details.slice(0, 300)].join(" ").trim();
   let precedentBlock: string | null = null;
   if (!keywordResult.skip) {
     if (supabase) {
@@ -351,13 +331,15 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
     }
     if (!precedentBlock) {
       const preferred = supabase ? await getPreferredKeywords(supabase) : [];
-      precedentBlock = await searchPrecedents(req.title, req.details, 8, keywordResult.query ?? undefined, {
+      const searchQuery = keywordResult.queryList.length > 0 ? keywordResult.queryList : (keywordResult.query ? [keywordResult.query] : undefined);
+      precedentBlock = await searchPrecedents(req.title, req.details, 8, searchQuery, {
         preferredSingleWords: preferred,
         onSingleWordSuccess: supabase ? (k) => learnKeyword(supabase, k) : undefined,
       });
       if (precedentBlock && supabase) await setCachedPrecedents(supabase, queryKey, precedentBlock);
     }
   }
+  const precedentUsed = !!precedentBlock;
   if (precedentBlock) {
     console.log("[GAEPAN][Judge] 실시간 판례 검색 결과 반영됨", keywordResult.caseType ? `사건유형: ${keywordResult.caseType}` : "", keywordResult.query ? "(AI 검색어 사용)" : "");
   } else if (keywordResult.skip) {
@@ -497,7 +479,8 @@ async function callGemini(req: JudgeRequest, supabase: SupabaseClient | null): P
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt <= GEMINI_MAX_RETRIES; attempt++) {
     try {
-      return await doGenerate();
+      const verdict = await doGenerate();
+      return { verdict, precedent_used: precedentUsed };
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
       if (attempt < GEMINI_MAX_RETRIES) {
@@ -623,14 +606,18 @@ export async function POST(request: Request) {
     const hasGemini = !!process.env.GEMINI_API_KEY;
 
     let verdict: JudgeVerdict;
+    let precedentUsed = false;
     if (hasGemini) {
       try {
         console.log("[GAEPAN][POST /api/judge] calling Gemini with trial_type=", trial_type);
-        verdict = await callGemini(req, supabase);
+        const result = await callGemini(req, supabase);
+        verdict = result.verdict;
+        precedentUsed = result.precedent_used;
         console.log("[GAEPAN][POST /api/judge] Gemini verdict", {
           title: verdict.title?.slice(0, 80),
           ratio: verdict.ratio,
           verdict: verdict.verdict?.slice(0, 120),
+          precedent_used: precedentUsed,
         });
       } catch (geminiErr) {
         console.error("[GAEPAN] callGemini failed", geminiErr);
@@ -715,7 +702,7 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json(
-      jsonSuccess({ mock: !hasGemini, verdict, post_id: inserted?.id ?? null })
+      jsonSuccess({ mock: !hasGemini, verdict, post_id: inserted?.id ?? null, precedent_used: precedentUsed })
     );
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";

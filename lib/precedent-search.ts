@@ -10,6 +10,8 @@
  * 위 조건 중 하나라도 불만족 시 null 반환 → Judge는 "참조 판례 미제공"으로 진행.
  */
 
+import iconv from "iconv-lite";
+
 const LAW_API_BASE = "https://www.law.go.kr/DRF/lawSearch.do";
 const LAW_SERVICE_BASE = "https://www.law.go.kr/DRF/lawService.do";
 /** 대법원 판례만 검색 (org: 400201) */
@@ -35,13 +37,27 @@ function getQueryString(title: string, details: string, queryOverride?: string |
   return extractKeywords(title, details);
 }
 
-/** API 응답에서 판례 배열 추출 */
+/** API 응답에서 판례 배열 추출 (다양한 응답 형태 지원). 법령정보 API는 최상위 키가 PrecSearch 인 경우 있음 */
 function parsePrecList(data: unknown): unknown[] {
+  const d = data as Record<string, unknown>;
+  const precSearch = d?.PrecSearch ?? d?.precSearch;
+  const fromPrecSearch =
+    Array.isArray(precSearch)
+      ? precSearch
+      : typeof precSearch === "object" && precSearch !== null
+        ? (precSearch as Record<string, unknown>).prec ??
+          (precSearch as Record<string, unknown>).Prec ??
+          (precSearch as Record<string, unknown>).precList ??
+          (precSearch as Record<string, unknown>).판례
+        : undefined;
   const rawItems =
-    (data as Record<string, unknown>)?.prec ??
-    (data as Record<string, unknown>)?.Prec ??
-    (data as Record<string, unknown>)?.판례 ??
-    (data as Record<string, unknown>)?.precList ??
+    d?.prec ??
+    d?.Prec ??
+    d?.판례 ??
+    d?.precList ??
+    (d?.PrecList as unknown) ??
+    fromPrecSearch ??
+    (typeof d?.result === "object" && d.result !== null ? (d.result as Record<string, unknown>).prec : undefined) ??
     (Array.isArray(data) ? data : null);
   return Array.isArray(rawItems) ? rawItems : [];
 }
@@ -62,6 +78,9 @@ function toRow(p: unknown): PrecRow | null {
   if (hasName && hasIdentifier) return { name, no, date, court, id: id || undefined };
   return null;
 }
+
+/** queryList 검색 0건이고 본문에서 단일어를 못 뽑았을 때 시도할 기본 단일어 (군사·일반) */
+const DEFAULT_FALLBACK_SINGLE_WORDS = ["탈영", "군무이탈", "형법"];
 
 /** 대법원 판례 사건명에 자주 나오는 단일 검색어 — 0건일 때 이걸로 한 번씩 더 검색 */
 const SINGLE_WORD_QUERIES = [
@@ -137,15 +156,14 @@ export type SearchPrecedentsOptions = {
 
 /**
  * 판례 목록 조회. OC 미설정 또는 API 오류 시 null 반환.
- * 사건명 검색(search=1) + 본문 검색(search=2) 둘 다 수행해 결과를 합치고, 중복 제거 후 반환.
- * @param queryOverride - 사건 본문 분석으로 얻은 검색 키워드(있으면 이걸로 검색, 없으면 제목+경위에서 추출)
- * @param options - preferredSingleWords: 학습된 키워드 우선 시도, onSingleWordSuccess: 단일어 성공 시 콜백(학습)
+ * queryOverride가 문자열 배열이면 각 사건 명칭마다 따로 검색해 결과를 합침. 문자열이면 기존처럼 한 번만 검색.
+ * @param queryOverride - 단일 검색어 또는 유사 사건 명칭 배열(각각 한 번씩 검색)
  */
 export async function searchPrecedents(
   title: string,
   details: string,
   limit = 10,
-  queryOverride?: string | null,
+  queryOverride?: string | string[] | null,
   options?: SearchPrecedentsOptions | null
 ): Promise<string | null> {
   const oc = process.env.LAW_GO_KR_OC?.trim();
@@ -154,6 +172,7 @@ export async function searchPrecedents(
     console.log("[GAEPAN][판례] 검색 스킵: LAW_GO_KR_OC 미설정. Vercel/서버에 LAW_GO_KR_OC 환경 변수를 추가한 뒤 재배포하세요.");
     return null;
   }
+  console.log("[GAEPAN][판례] OC 사용 중 (이메일 @ 앞 ID와 일치해야 함). 앞 2자:", oc.slice(0, 2), "길이:", oc.length);
 
   const display = Math.min(Math.max(limit, 15), 20);
   const seen = new Set<string>();
@@ -162,61 +181,151 @@ export async function searchPrecedents(
   const onSingleWordSuccess = options?.onSingleWordSuccess;
 
   const runSearch = async (queryStr: string, search: 1 | 2): Promise<void> => {
-    const query = encodeURIComponent(queryStr);
+    const q = (queryStr || "").trim().slice(0, 100);
+    if (!q) return;
+    const query = encodeURIComponent(q);
     const url = `${LAW_API_BASE}?OC=${encodeURIComponent(oc)}&target=prec&type=JSON&query=${query}&search=${search}&org=${ORG_SUPREME_COURT}&display=${display}`;
     try {
       const res = await fetch(url, {
-        headers: { Accept: "application/json" },
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "GAEPAN/1.0 (precedent-search)",
+          Referer: "https://www.law.go.kr/",
+        },
         signal: AbortSignal.timeout(10000),
       });
-      if (!res.ok) return;
-      const raw = await res.text();
-      if (!raw?.trim()) return;
-      const data = JSON.parse(raw) as unknown;
-      for (const p of parsePrecList(data)) {
+      const buf = await res.arrayBuffer();
+      if (!res.ok) {
+        console.log("[GAEPAN][판례] API 응답 비정상", { query: q.slice(0, 30), status: res.status });
+        return;
+      }
+      if (!buf?.byteLength) {
+        console.log("[GAEPAN][판례] API 응답 본문 없음", { query: q.slice(0, 30) });
+        return;
+      }
+      const rawUtf8 = new TextDecoder("utf-8").decode(buf);
+      const rawEucKr = iconv.decode(Buffer.from(buf), "euc-kr");
+      const rawCp949 = iconv.decode(Buffer.from(buf), "cp949");
+      if (/미신청|등록된\s*API|법령종류\s*체크/i.test(rawUtf8) || /미신청|등록된\s*API|법령종류\s*체크/i.test(rawEucKr)) {
+        console.log("[GAEPAN][판례] 서버가 '미신청된 목록/본문' 등 접근 제한 응답 반환. OC가 이메일 @ 앞 ID인지, open.law.go.kr에서 판례 목록/본문 전부 체크·승인됐는지 확인. 문의: 02-2109-6446");
+      }
+      const strip = (s: string) => s.replace(/^\uFEFF/, "").trim();
+      let data: unknown;
+      const attempts = [
+        () => JSON.parse(strip(rawUtf8)),
+        () => JSON.parse(strip(rawEucKr)),
+        () => JSON.parse(strip(rawCp949)),
+      ];
+      let parsed = false;
+      for (const tryParse of attempts) {
+        try {
+          data = tryParse();
+          parsed = true;
+          break;
+        } catch {
+          continue;
+        }
+      }
+      if (!parsed) {
+        const preview = rawUtf8.slice(0, 120).replace(/\s/g, " ");
+        console.log("[GAEPAN][판례] API 응답 JSON 파싱 실패(UTF-8/EUC-KR/CP949)", { query: q.slice(0, 30), rawLength: buf.byteLength, preview });
+        return;
+      }
+      const list = parsePrecList(data);
+      if (list.length === 0) {
+        const topKeys = (data && typeof data === "object") ? Object.keys(data as object).slice(0, 15) : [];
+        const precSearch = (data as Record<string, unknown>)?.PrecSearch ?? (data as Record<string, unknown>)?.precSearch;
+        const innerInfo =
+          precSearch != null && typeof precSearch === "object" && !Array.isArray(precSearch)
+            ? { PrecSearchKeys: Object.keys(precSearch as object), totalCnt: (precSearch as Record<string, unknown>)?.totalCnt }
+            : Array.isArray(precSearch)
+              ? { PrecSearchIsArrayLength: precSearch.length }
+              : { PrecSearchType: typeof precSearch };
+        const snippet =
+          precSearch != null
+            ? JSON.stringify(precSearch).slice(0, 380).replace(/\s+/g, " ")
+            : "";
+        console.log("[GAEPAN][판례] API 응답 수신했으나 판례 배열 0건", { query: q.slice(0, 30), rawLength: buf.byteLength, topKeys, ...innerInfo, PrecSearchSnippet: snippet || undefined });
+      }
+      let accepted = 0;
+      for (const p of list) {
         const row = toRow(p);
         if (!row) continue;
         const key = row.no || `${row.name}|${row.date}`;
         if (seen.has(key)) continue;
         seen.add(key);
         validRows.push(row);
+        accepted++;
       }
-    } catch {
-      // ignore
+      if (list.length > 0 && accepted === 0) {
+        const first = list[0] as Record<string, unknown>;
+        console.log("[GAEPAN][판례] API는 항목 있으나 toRow 통과 0건 — 응답 필드 샘플:", { query: q.slice(0, 30), listLength: list.length, firstKeys: first ? Object.keys(first).slice(0, 15) : [] });
+      } else if (list.length === 0 && buf.byteLength > 50) {
+        const top = (data as Record<string, unknown>) ? Object.keys(data as object).slice(0, 12) : [];
+        console.log("[GAEPAN][판례] API 응답에 판례 배열 없음 — 상위 키:", { query: q.slice(0, 30), topKeys: top });
+      }
+    } catch (err) {
+      console.log("[GAEPAN][판례] runSearch 예외", { query: q.slice(0, 30), err: err instanceof Error ? err.message : String(err) });
     }
   };
 
   try {
-    const queryString = getQueryString(title, details, queryOverride);
-    const queryShort = queryString.slice(0, 60).trim();
-
-    await runSearch(queryShort, 1);
-    await runSearch(queryShort, 2);
-
-    if (validRows.length === 0) {
-      const fallbackQuery = getQueryString(title, details, null);
-      if (fallbackQuery !== queryString) {
-        await runSearch(fallbackQuery.slice(0, 80), 1);
-        await runSearch(fallbackQuery.slice(0, 80), 2);
-      }
-    }
-
-    if (validRows.length === 0) {
-      const combined = `${queryString} ${title} ${(details || "").slice(0, 200)}`;
-      const fromText = pickSingleWordsFromText(combined);
-      const preferred = options?.preferredSingleWords ?? [];
-      singleWordsTried = [...new Set([...preferred, ...fromText])];
-      for (const w of singleWordsTried) {
-        const before = validRows.length;
-        await runSearch(w, 1);
-        await runSearch(w, 2);
-        if (validRows.length > before && onSingleWordSuccess) onSingleWordSuccess(w);
+    const isQueryList = Array.isArray(queryOverride) && queryOverride.length > 0;
+    if (isQueryList) {
+      for (const q of queryOverride as string[]) {
+        const term = (q && typeof q === "string" ? q : "").trim().slice(0, 100);
+        if (!term) continue;
+        await runSearch(term, 1);
+        await runSearch(term, 2);
         if (validRows.length >= limit) break;
       }
+      if (validRows.length === 0) {
+        const combined = `${(queryOverride as string[]).join(" ")} ${title} ${(details || "").slice(0, 200)}`;
+        const fromText = pickSingleWordsFromText(combined);
+        const preferred = options?.preferredSingleWords ?? [];
+        singleWordsTried = [...new Set([...preferred, ...fromText])];
+        if (singleWordsTried.length === 0) singleWordsTried = DEFAULT_FALLBACK_SINGLE_WORDS;
+        for (const w of singleWordsTried) {
+          const before = validRows.length;
+          await runSearch(w, 1);
+          await runSearch(w, 2);
+          if (validRows.length > before && onSingleWordSuccess) onSingleWordSuccess(w);
+          if (validRows.length >= limit) break;
+        }
+      }
+    } else {
+      const queryString = getQueryString(title, details, typeof queryOverride === "string" ? queryOverride : null);
+      const queryShort = queryString.slice(0, 60).trim();
+      await runSearch(queryShort, 1);
+      await runSearch(queryShort, 2);
+
+      if (validRows.length === 0) {
+        const fallbackQuery = getQueryString(title, details, null);
+        if (fallbackQuery !== queryString) {
+          await runSearch(fallbackQuery.slice(0, 80), 1);
+          await runSearch(fallbackQuery.slice(0, 80), 2);
+        }
+      }
+
+      if (validRows.length === 0) {
+        const combined = `${queryString} ${title} ${(details || "").slice(0, 200)}`;
+        const fromText = pickSingleWordsFromText(combined);
+        const preferred = options?.preferredSingleWords ?? [];
+        singleWordsTried = [...new Set([...preferred, ...fromText])];
+        if (singleWordsTried.length === 0) singleWordsTried = DEFAULT_FALLBACK_SINGLE_WORDS;
+        for (const w of singleWordsTried) {
+          const before = validRows.length;
+          await runSearch(w, 1);
+          await runSearch(w, 2);
+          if (validRows.length > before && onSingleWordSuccess) onSingleWordSuccess(w);
+          if (validRows.length >= limit) break;
+        }
+      }
     }
 
     if (validRows.length === 0) {
-      console.log("[GAEPAN][판례] 검색 결과 0건. 쿼리:", queryShort.slice(0, 60), "단일어 시도:", singleWordsTried);
+      const queryShort = isQueryList ? (queryOverride as string[]).join(", ") : getQueryString(title, details, typeof queryOverride === "string" ? queryOverride : null);
+      console.log("[GAEPAN][판례] 검색 결과 0건. 쿼리:", String(queryShort).slice(0, 60), "단일어 시도:", singleWordsTried);
       return null;
     }
 
