@@ -29,8 +29,33 @@ function getQueryString(title: string, details: string, queryOverride?: string |
   return extractKeywords(title, details);
 }
 
+/** API 응답에서 판례 배열 추출 */
+function parsePrecList(data: unknown): unknown[] {
+  const rawItems =
+    (data as Record<string, unknown>)?.prec ??
+    (data as Record<string, unknown>)?.Prec ??
+    (data as Record<string, unknown>)?.판례 ??
+    (data as Record<string, unknown>)?.precList ??
+    (Array.isArray(data) ? data : null);
+  return Array.isArray(rawItems) ? rawItems : [];
+}
+
+/** 한 건의 판례에서 사건명·번호·일자·법원 추출 */
+function toRow(p: unknown): { name: string; no: string; date: string; court: string } | null {
+  const row = p as Record<string, unknown>;
+  const name = String(row?.사건명 ?? row?.caseNm ?? "").trim();
+  const no = String(row?.사건번호 ?? row?.caseNo ?? "").trim();
+  const date = String(row?.선고일자 ?? row?.선고일 ?? row?.jugdDe ?? "").trim();
+  const court = String(row?.법원명 ?? row?.courtNm ?? "").trim();
+  const hasName = name.length > 0 && name !== "-";
+  const hasIdentifier = no.length > 0 || date.length > 0 || court.length > 0;
+  if (hasName && hasIdentifier) return { name, no, date, court };
+  return null;
+}
+
 /**
  * 판례 목록 조회. OC 미설정 또는 API 오류 시 null 반환.
+ * 사건명 검색(search=1) + 본문 검색(search=2) 둘 다 수행해 결과를 합치고, 중복 제거 후 반환.
  * @param queryOverride - 사건 본문 분석으로 얻은 검색 키워드(있으면 이걸로 검색, 없으면 제목+경위에서 추출)
  */
 export async function searchPrecedents(
@@ -42,81 +67,50 @@ export async function searchPrecedents(
   const oc = process.env.LAW_GO_KR_OC?.trim();
   if (!oc || typeof window !== "undefined") return null;
 
-  const queryString = getQueryString(title, details, queryOverride);
-  const query = encodeURIComponent(queryString);
-  /** search=2: 본문 검색(판례 내용까지 검색) → 대법원 판례를 확실히 찾기 위해 본문 검색 */
-  const search = 2;
-  const url = `${LAW_API_BASE}?OC=${encodeURIComponent(oc)}&target=prec&type=JSON&query=${query}&search=${search}&org=${ORG_SUPREME_COURT}&display=${Math.min(Math.max(limit, 15), 20)}`;
+  const display = Math.min(Math.max(limit, 15), 20);
+  const seen = new Set<string>();
+  const validRows: { name: string; no: string; date: string; court: string }[] = [];
+
+  const runSearch = async (queryStr: string, search: 1 | 2): Promise<void> => {
+    const query = encodeURIComponent(queryStr);
+    const url = `${LAW_API_BASE}?OC=${encodeURIComponent(oc)}&target=prec&type=JSON&query=${query}&search=${search}&org=${ORG_SUPREME_COURT}&display=${display}`;
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) return;
+      const raw = await res.text();
+      if (!raw?.trim()) return;
+      const data = JSON.parse(raw) as unknown;
+      for (const p of parsePrecList(data)) {
+        const row = toRow(p);
+        if (!row) continue;
+        const key = row.no || `${row.name}|${row.date}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        validRows.push(row);
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   try {
-    let res = await fetch(url, {
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(10000),
-    });
+    const queryString = getQueryString(title, details, queryOverride);
+    const queryShort = queryString.slice(0, 60).trim();
 
-    if (!res.ok) return null;
+    await runSearch(queryShort, 1);
+    await runSearch(queryShort, 2);
 
-    let raw = await res.text();
-    if (!raw?.trim()) return null;
-
-    let data: unknown;
-    try {
-      data = JSON.parse(raw);
-    } catch {
-      return null;
-    }
-
-    let rawItems =
-      (data as Record<string, unknown>)?.prec ??
-      (data as Record<string, unknown>)?.Prec ??
-      (data as Record<string, unknown>)?.판례 ??
-      (Array.isArray(data) ? data : null);
-    let rawList: unknown[] = Array.isArray(rawItems) ? rawItems : [];
-
-    // AI 키워드로 검색했는데 결과 없으면: 제목 + 경위 앞부분으로 재검색(대법원 판례 확보용)
-    if (rawList.length === 0 && queryOverride?.trim()) {
+    if (validRows.length === 0) {
       const fallbackQuery = getQueryString(title, details, null);
       if (fallbackQuery !== queryString) {
-        const fallbackUrl = `${LAW_API_BASE}?OC=${encodeURIComponent(oc)}&target=prec&type=JSON&query=${encodeURIComponent(fallbackQuery)}&search=${search}&org=${ORG_SUPREME_COURT}&display=20`;
-        const res2 = await fetch(fallbackUrl, {
-          headers: { Accept: "application/json" },
-          signal: AbortSignal.timeout(8000),
-        });
-        if (res2.ok) {
-          const raw2 = await res2.text();
-          if (raw2?.trim()) {
-            try {
-              data = JSON.parse(raw2);
-              rawItems =
-                (data as Record<string, unknown>)?.prec ??
-                (data as Record<string, unknown>)?.Prec ??
-                (data as Record<string, unknown>)?.판례 ??
-                (Array.isArray(data) ? data : null);
-              rawList = Array.isArray(rawItems) ? rawItems : [];
-            } catch {
-              // keep rawList as is (empty)
-            }
-          }
-        }
+        await runSearch(fallbackQuery.slice(0, 80), 1);
+        await runSearch(fallbackQuery.slice(0, 80), 2);
       }
     }
 
-    if (rawList.length === 0) return null;
-
-    // 확실한 정보만 사용: 사건명이 있고, 사건번호 또는 선고일자·법원명 중 하나라도 있는 항목만 포함
-    const validRows: { name: string; no: string; date: string; court: string }[] = [];
-    for (const p of rawList) {
-      const row = p as Record<string, unknown>;
-      const name = String(row?.사건명 ?? row?.caseNm ?? "").trim();
-      const no = String(row?.사건번호 ?? row?.caseNo ?? "").trim();
-      const date = String(row?.선고일자 ?? row?.선고일 ?? row?.jugdDe ?? "").trim();
-      const court = String(row?.법원명 ?? row?.courtNm ?? "").trim();
-      const hasName = name.length > 0 && name !== "-";
-      const hasIdentifier = no.length > 0 || date.length > 0 || court.length > 0;
-      if (hasName && hasIdentifier) {
-        validRows.push({ name, no, date, court });
-      }
-    }
     if (validRows.length === 0) return null;
 
     const lines = validRows.slice(0, limit).map((r, i) => {
