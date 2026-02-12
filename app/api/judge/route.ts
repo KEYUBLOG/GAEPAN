@@ -203,25 +203,39 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
   }
 }
 
-/** 참조 판례 블록에서 사건번호(2019도12345, 2020다1234 등)만 추출 — 법령 API로 확인된 것만 인용 허용용 */
+/** 판례 사건번호를 4자리 연도 형식으로 통일. 88도1238 → 1988도1238, 25도123 → 2025도123 */
+function normalizeCaseNumber(num: string): string {
+  const n = num.replace(/\s/g, "");
+  const twoDigit = /^(\d{2})(도|다|가|나)(\d+)$/.exec(n);
+  if (twoDigit) {
+    const yy = parseInt(twoDigit[1], 10);
+    const year = yy <= 30 ? 2000 + yy : 1900 + yy;
+    return `${year}${twoDigit[2]}${twoDigit[3]}`;
+  }
+  return n;
+}
+
+/** 참조 판례 블록에서 사건번호(2019도12345, 88도1238 등)만 추출 — 2자리 연도는 4자리로 정규화해 허용 목록에 넣음 */
 function parseAllowedPrecedentCaseNumbers(block: string): Set<string> {
   const set = new Set<string>();
-  const re = /\d{4}\s*(도|다|가|나)\s*\d+/g;
+  const re = /\d{2,4}\s*(도|다|가|나)\s*\d+/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(block)) !== null) {
-    set.add(m[0].replace(/\s/g, ""));
+    const raw = m[0].replace(/\s/g, "");
+    set.add(raw.length <= 8 ? normalizeCaseNumber(raw) : raw);
   }
   return set;
 }
 
-/** rationale/verdict에서 허용 목록에 없는 판례 번호(할루시네이션)를 [인용 생략]으로 치환. allowed가 비어 있으면 모든 판례 번호 제거. */
+/** rationale/verdict에서 허용 목록에 없는 판례 번호(할루시네이션)를 [인용 생략]으로 치환. 88도1238 등 2자리 연도도 정규화해 비교. */
 function sanitizePrecedentCitations(text: string, allowedCaseNumbers: Set<string>): string {
   if (!text || !text.trim()) return text;
-  const re = /\d{4}\s*(도|다|가|나)\s*\d+/g;
+  const re = /\d{2,4}\s*(도|다|가|나)\s*\d+/g;
   return text.replace(re, (match) => {
-    const normalized = match.replace(/\s/g, "");
+    const raw = match.replace(/\s/g, "");
+    const normalized = raw.length <= 8 ? normalizeCaseNumber(raw) : raw;
     if (allowedCaseNumbers.size === 0) return "[인용 생략]";
-    if (allowedCaseNumbers.has(normalized)) return match;
+    if (allowedCaseNumbers.has(normalized) || allowedCaseNumbers.has(raw)) return match;
     return "[인용 생략]";
   });
 }
