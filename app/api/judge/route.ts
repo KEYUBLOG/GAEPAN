@@ -208,7 +208,7 @@ async function extractPrecedentKeywords(title: string, details: string): Promise
     if (mostSimilarTitle && /^\d{4}\s*(도|다|가|나)\s*\d+$/.test(mostSimilarTitle.replace(/\s/g, ""))) mostSimilarTitle = null;
     const fourth = (lines[3] ?? lines[2] ?? "").toLowerCase();
     const defendantWronged = /억울|무혐의|오인|착오|잘못\s*기소|혐의\s*없/i.test(fourth) || fourth.includes("억울함");
-    const filteredNames = similarCaseNames.filter((n) => !/^\d{4}\s*(도|다|가|나)\s*\d+$/.test(n.replace(/\s/g, "")));
+    const filteredNames = similarCaseNames.filter((n: string) => !/^\d{4}\s*(도|다|가|나)\s*\d+$/.test(n.replace(/\s/g, "")));
     const primaryTitle = (mostSimilarTitle && mostSimilarTitle.length > 0 ? mostSimilarTitle : null) ?? filteredNames[0] ?? null;
     const query = primaryTitle
       ? `${primaryTitle} 판례`.slice(0, 100)
