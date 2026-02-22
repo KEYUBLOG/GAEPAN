@@ -82,13 +82,16 @@ function precedentRelevanceScore(
       .filter((w: string) => w.length >= 2);
   const caseWords = new Set([...toWords(caseTitle), ...toWords((caseDetails || "").slice(0, 500))]);
   const nameWords = toWords(row.name);
+  const nameLower = row.name;
   let score = 0;
   for (const w of nameWords) {
     if (caseWords.has(w)) score += 2;
     else if ([...caseWords].some((c) => c.includes(w) || w.includes(c))) score += 1;
   }
+  for (const c of caseWords) {
+    if (nameLower.includes(c)) score += 2;
+  }
   if (searchTerms?.length) {
-    const nameLower = row.name;
     for (const term of searchTerms) {
       const t = (term || "").trim();
       if (t.length < 2) continue;
@@ -104,20 +107,25 @@ function precedentRelevanceScore(
   return score;
 }
 
-/** 두 텍스트 간 단어 겹침 점수 (판시사항·본문 비교용). */
+/** 두 텍스트 간 단어 겹침 점수 (판시사항·본문 비교용). 본문 단어가 판례에 포함돼도 인정. */
 function textOverlapScore(caseText: string, precedentText: string): number {
   const toWords = (s: string) =>
     (s || "")
       .replace(/[\s,.\-·]+/g, " ")
       .trim()
       .split(/\s+/)
-      .filter((w) => w.length >= 2);
-  const caseSet = new Set(toWords(caseText.slice(0, 800)));
+      .filter((w: string) => w.length >= 2);
+  const caseWords = toWords(caseText.slice(0, 800));
+  const caseSet = new Set(caseWords);
   const precWords = toWords(precedentText.slice(0, 1500));
+  const precLower = precedentText.slice(0, 1500);
   let n = 0;
   for (const w of precWords) {
     if (caseSet.has(w)) n += 2;
-    else if ([...caseSet].some((c) => c.includes(w) || w.includes(c))) n += 1;
+    else if ([...caseSet].some((c: string) => c.includes(w) || w.includes(c))) n += 1;
+  }
+  for (const c of caseWords) {
+    if (precLower.includes(c)) n += 2;
   }
   return n;
 }
@@ -137,8 +145,8 @@ function toRow(p: unknown): PrecRow | null {
   return null;
 }
 
-/** 본문과 유사도가 이 점수 미만이면 참조 판례 블록에 넣지 않음 (전혀 다른 판례 제외) */
-const MIN_RELEVANCE_SCORE = 3;
+/** 본문과 유사도가 이 점수 미만이면 참조 판례 블록에 넣지 않음 (단, 유사 사건명 검색으로 찾은 판례는 1점 이상이면 포함) */
+const MIN_RELEVANCE_SCORE = 2;
 
 /** queryList 검색 0건이고 본문에서 단일어를 못 뽑았을 때 시도할 기본 단일어 (군사·일반) */
 const DEFAULT_FALLBACK_SINGLE_WORDS = ["탈영", "군무이탈", "형법"];
@@ -425,7 +433,15 @@ export async function searchPrecedents(
       return scoreB - scoreA;
     });
     const getScore = (r: PrecRowWithSource) => contentScoreMap.get(`${r.no}|${r.name}`) ?? nameScore(r);
-    const similarOnly = sorted.filter((r) => getScore(r) >= MIN_RELEVANCE_SCORE);
+    const isFromPriorityQuery = (r: PrecRowWithSource) =>
+      priorityQueryCount > 0 &&
+      searchTerms?.length &&
+      (r.sourceQuery || "").trim() &&
+      searchTerms.slice(0, priorityQueryCount).some((t) => (t || "").trim() === (r.sourceQuery || "").trim());
+    const similarOnly = sorted.filter((r) => {
+      const s = getScore(r);
+      return s >= MIN_RELEVANCE_SCORE || (isFromPriorityQuery(r) && s >= 1);
+    });
     if (similarOnly.length === 0) {
       console.log("[GAEPAN][판례] 본문과 유사한 판례 없음(최소 점수 미달) — 참조 판례 블록 생략");
       return null;
